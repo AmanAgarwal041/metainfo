@@ -1,14 +1,6 @@
 use regex::Regex;
 use std::str::Split;
-use wasm_bindgen::prelude::*;
-
-#[wasm_bindgen]
-extern "C" {
-  // Use `js_namespace` here to bind `console.log(..)` instead of just
-  // `log(..)`
-  #[wasm_bindgen(js_namespace = console)]
-  fn log(s: String);
-}
+use crate::helpers::logger::log;
 
 #[derive(Debug)]
 #[derive(PartialEq)]
@@ -43,14 +35,6 @@ impl MetaTag {
       self.property = value.to_string();
     } else if key == "content" {
       self.content = value.to_string();
-    }
-  }
-
-  fn get_type_by_name(name: &str) -> MetaType {
-    if name.starts_with("facebook") {
-      MetaType::FACEBOOK
-    } else {
-      MetaType::NONE
     }
   }
 

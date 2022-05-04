@@ -7,8 +7,9 @@ use web_sys::{Request, RequestInit, RequestMode, Response};
 use js_sys::JsString;
 // use reqwest::Error;
 // use reqwest::Response;
-mod parse_html;
+pub(crate) mod helpers;
 pub(crate) mod tags;
+mod parse_html;
 
 #[wasm_bindgen]
 pub async fn run(data: String, mode: isize) -> Result<JsValue, JsValue> {
