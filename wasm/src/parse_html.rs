@@ -1,15 +1,6 @@
-use wasm_bindgen::prelude::*;
-
 use crate::tags::meta::MetaProperties;
 use crate::tags::heading::HeadingProperties;
-
-#[wasm_bindgen]
-extern "C" {
-    // Use `js_namespace` here to bind `console.log(..)` instead of just
-    // `log(..)`
-    #[wasm_bindgen(js_namespace = console)]
-    fn log(s: String);
-}
+use crate::tags::script::ScriptProperties;
 
 pub fn parse(html: String) -> () {
   let metatags = MetaProperties::parse(html.clone());
@@ -17,4 +8,7 @@ pub fn parse(html: String) -> () {
 
   let headingtags = HeadingProperties::parse(html.clone());
   headingtags.print_tags();
+
+  let scriptags = ScriptProperties::parse(html.clone());
+  scriptags.print_tags();
 }
