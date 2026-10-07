@@ -17,6 +17,34 @@ generates the fixes, and tracks your scores over time.
 | **Fix plan** | Failing checks grouped into Blockers → Quick wins → Foundations → Polish, ranked by estimated score gain per unit of effort. Includes per-task status, projected scores, and Markdown export for tickets. |
 | **Tracking** | Every scan is saved as a snapshot, with trend charts per platform, a fixed/regressed diff between scans, and tasks auto-verified when a rescan passes. |
 
+## Research tools
+
+Shared across pages: your site, up to 5 competitors and a target market (15 countries), remembered in the browser.
+
+| Page | Free (no keys) | With DataForSEO |
+| --- | --- | --- |
+| **Keywords** (`/keywords`) | Long-tail ideas from Google Autocomplete (seed × questions, modifiers, a–z), grouped into questions, commercial, comparisons and prepositions | Search volume, keyword difficulty, CPC, intent, a 12-month trend and an opportunity score (volume × ease) |
+| **Keyword gap** (`/keyword-gap`) | **Content gap:** topics competitors' pages cover that yours doesn't, extracted by the Rust engine (phrase extraction weighted by title, H1, headings and URL) | **Ranking gap:** keywords competitors rank for and you don't (missing), where they outrank you (weak), and where you lead (strong) |
+| **Competitors** (`/competitors`) | **Audit comparison:** the full audit on your homepage and each competitor's side by side, plus "they do it, you don't" | Organic competitors by keyword overlap, their ranking keywords, top-3 counts and estimated traffic |
+| **SERP** (`/serp`) | **Benchmark:** paste ranking URLs and compare their word count, structure, schema and scores with your page | Live Google results (desktop or mobile, top 20), SERP features, AI Overview sources (are you cited?), featured snippet owner, People also ask, related searches. Every check is saved for **rank tracking**, and you can benchmark the top 5 automatically |
+| **Backlinks** (`/backlinks`) | n/a (no reliable free source; use Search Console's Links report) | Profile comparison with competitors, link gap (sites linking to competitors but not to you), top referring domains, anchors, newest links |
+
+### Connecting DataForSEO
+
+DataForSEO is pay-as-you-go with no subscription. Roughly: a keyword search makes 3 Labs calls (about $0.05 total), a keyword gap 2 calls per competitor, a live SERP
+about $0.004, and backlinks about $0.025 per request. The Backlinks API may need enabling at app.dataforseo.com first. Copy
+`.env.example` to `.env.local` and set:
+
+```bash
+DATAFORSEO_LOGIN=you@example.com
+DATAFORSEO_PASSWORD=your-api-password     # app.dataforseo.com/api-access
+RESEARCH_TOKEN=some-secret                # strongly recommended when deployed
+```
+
+* Responses are cached in memory for 12 hours, so repeating a lookup is free. Each result shows what it cost.
+* With `RESEARCH_TOKEN` set, `/api/research/*` requires it (the UI asks for it once), so a public deployment can't spend your balance.
+* `DATAFORSEO_API_URL=https://sandbox.dataforseo.com/v3/` uses DataForSEO's free sandbox (dummy data) for testing.
+
 ## Architecture
 
 ```
@@ -29,10 +57,13 @@ browser: Rust → WASM engine (wasm/) ── parse · 55+ checks · scoring · p
 ```
 
 * **`wasm/`**: the Rust engine (`metainfo-core`): `extract` (html5ever via `scraper`), `robots`, `sitemap`, `llms`,
-  `crawlers`, `checks`, `scoring`, `generate`. Compiled with `wasm-pack --target web`. A 1 MB page analyses in about 50–120 ms.
+  `crawlers`, `checks`, `scoring`, `generate`, `keywords` (on-page topic extraction, plus `term_counts` for the content gap). Compiled with `wasm-pack --target web`. A 1 MB page analyses in about 50–120 ms.
 * **`app/api/scan`**: server-side fetcher. Browsers can't fetch other sites because of CORS, so fetching lives here.
 * **`app/api/report`**: runs the same WASM engine server-side, for CI and cron tracking.
-* **`components/`, `lib/`**: the UI. Tracking history lives in `localStorage` (`lib/history.ts`).
+* **`app/api/research/*`**: keyword, gap, competitor, SERP and backlink endpoints (`lib/server/dataforseo.ts`,
+  `lib/server/autocomplete.ts`). They normalise provider data into `lib/research-types.ts`.
+* **`components/`, `lib/`**: the UI. Audit history, rank history and the project (site, competitors, market) live in
+  `localStorage` (`lib/history.ts`, `lib/rank-history.ts`, `lib/project.ts`).
 
 ## Develop
 

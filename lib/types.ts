@@ -131,6 +131,20 @@ export interface PageData {
   firstParagraph?: string | null;
   excerpt: string;
   spaShell: boolean;
+  topics: Topic[];
+}
+
+export interface Topic {
+  term: string;
+  words: number;
+  count: number;
+  density: number;
+  score: number;
+  inTitle: boolean;
+  inH1: boolean;
+  inHeadings: boolean;
+  inDescription: boolean;
+  inUrl: boolean;
 }
 
 export interface CrawlerAccess {

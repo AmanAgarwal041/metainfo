@@ -21,12 +21,14 @@ export default function Report({
   meta,
   site,
   onRescan,
+  onNewScan,
   onSiteChange,
 }: {
   report: ReportT;
   meta: ScanMeta;
   site: TrackedSite | null;
   onRescan: () => void;
+  onNewScan: () => void;
   onSiteChange: (s: TrackedSite) => void;
 }) {
   const [tab, setTab] = useState<TabId>("overview");
@@ -100,6 +102,9 @@ export default function Report({
             onClick={() => download(`metainfo-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(report, null, 2), "application/json")}
           >
             Export JSON
+          </button>
+          <button className="btn" onClick={onNewScan}>
+            New scan
           </button>
           <button className="btn btn-primary" onClick={onRescan}>
             Rescan

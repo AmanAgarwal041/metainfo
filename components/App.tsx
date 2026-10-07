@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchBundle, htmlBundle, loadEngine, runEngine } from "@/lib/engine";
 import { loadSites, recordScan, type TrackedSite } from "@/lib/history";
+import { saveProject } from "@/lib/project";
 import type { Report as ReportT } from "@/lib/types";
 import Home from "./Home";
 import Report from "./Report";
@@ -20,6 +21,14 @@ const STEPS = [
   { id: "fetching", label: "Fetching the page, robots.txt, sitemaps & llms.txt; probing 10 crawler user agents" },
   { id: "analyzing", label: "Running the Rust/WASM engine: parsing, 55+ checks, scoring, fix plan" },
 ];
+
+function loadProjectDomain(): string {
+  try {
+    return JSON.parse(localStorage.getItem("metainfo:project:v1") ?? "{}").domain ?? "";
+  } catch {
+    return "";
+  }
+}
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>("idle");
@@ -48,6 +57,7 @@ export default function App() {
       setSite(recordScan(report));
       setSites(loadSites());
       setPhase("done");
+      if (!loadProjectDomain()) saveProject({ domain: report.finalUrl || url, competitors: [], location: 2840 });
       const q = new URL(window.location.href);
       q.searchParams.set("url", report.finalUrl || url);
       window.history.replaceState(null, "", q);
@@ -110,14 +120,6 @@ export default function App() {
 
   return (
     <>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <button className="brand" onClick={goHome}>
-            <span className="brand-mark">M</span> MetaInfo
-          </button>
-          <span className="topbar-meta">SEO + AI visibility · Rust/WASM engine</span>
-        </div>
-      </header>
       <main className="shell">
         {busy && (
           <div className="card progress-steps" aria-live="polite">
@@ -141,6 +143,7 @@ export default function App() {
             meta={meta}
             site={site}
             onRescan={rescan}
+            onNewScan={goHome}
             onSiteChange={(s) => {
               setSite(s);
               setSites(loadSites());

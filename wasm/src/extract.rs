@@ -149,6 +149,7 @@ pub struct PageData {
     pub question_headings: usize,
     pub first_paragraph: Option<String>,
     pub excerpt: String,
+    pub topics: Vec<crate::keywords::Term>,
 }
 
 impl PageData {
@@ -233,26 +234,89 @@ pub fn collapse_ws(s: &str) -> String {
 
 fn text_of(el: ElementRef) -> String {
     let mut buf = String::new();
-    collect_text(el, &mut buf);
+    collect_text(el, &mut buf, &[]);
     collapse_ws(&buf)
 }
 
 const SKIP_TEXT: [&str; 7] = ["script", "style", "noscript", "template", "svg", "iframe", "canvas"];
 
-fn collect_text(el: ElementRef, out: &mut String) {
+const BLOCK_TAGS: [&str; 32] = [
+    "p",
+    "div",
+    "li",
+    "ul",
+    "ol",
+    "dl",
+    "dt",
+    "dd",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "section",
+    "article",
+    "nav",
+    "header",
+    "footer",
+    "aside",
+    "main",
+    "table",
+    "tr",
+    "td",
+    "th",
+    "blockquote",
+    "figcaption",
+    "br",
+    "button",
+    "option",
+    "label",
+    "form",
+];
+
+/// The text keyword analysis runs on: the main content region when there is
+/// one, else the whole body, with block boundaries kept as newlines.
+fn keyword_body(doc: &Html) -> Option<String> {
+    doc.select(&sel("main, article, [role=main]"))
+        .next()
+        .filter(|el| text_of(*el).len() > 200)
+        .or_else(|| doc.select(&sel("body")).next())
+        .map(block_text_of)
+}
+
+/// How often each term (1–3 words) appears in a page's main text.
+pub fn term_counts(html: &str, terms: &[String]) -> Vec<usize> {
+    let doc = Html::parse_document(html);
+    let body = keyword_body(&doc).unwrap_or_default();
+    crate::keywords::count_terms(&body, terms)
+}
+
+/// Body text with block boundaries kept as newlines.
+fn block_text_of(el: ElementRef) -> String {
+    let mut buf = String::new();
+    // Code samples aren't topics.
+    collect_text(el, &mut buf, &["pre", "code", "kbd", "samp"]);
+    buf
+}
+
+fn collect_text(el: ElementRef, out: &mut String, also_skip: &[&str]) {
     for child in el.children() {
         match child.value() {
             Node::Text(t) => {
                 out.push_str(t);
             }
             Node::Element(e) => {
-                if SKIP_TEXT.contains(&e.name()) {
+                if SKIP_TEXT.contains(&e.name()) || also_skip.contains(&e.name()) {
                     continue;
                 }
                 if let Some(c) = ElementRef::wrap(child) {
-                    out.push(' ');
-                    collect_text(c, out);
-                    out.push(' ');
+                    // Newlines mark block boundaries (keyword phrases never cross them);
+                    // text_of() collapses them back to spaces.
+                    let sep = if BLOCK_TAGS.contains(&e.name()) { '\n' } else { ' ' };
+                    out.push(sep);
+                    collect_text(c, out, also_skip);
+                    out.push(sep);
                 }
             }
             _ => {}
@@ -578,6 +642,19 @@ pub fn extract(html: &str, base: Option<&Url>) -> PageData {
     p.word_count = body_text.split_whitespace().count();
     p.text_ratio = if html.is_empty() { 0.0 } else { body_text.len() as f64 / html.len() as f64 };
     p.excerpt = truncate_chars(&main_text, 600);
+
+    if let Some(body) = keyword_body(&doc) {
+        let h1: Vec<String> = p.h1s().map(|h| h.text.clone()).collect();
+        let headings: Vec<String> = p.headings.iter().map(|h| h.text.clone()).collect();
+        p.topics = crate::keywords::extract(&crate::keywords::Zones {
+            body: &body,
+            title: p.title.as_deref(),
+            description: p.description.as_deref(),
+            h1: &h1,
+            headings: &headings,
+            url_path: base.map(|b| b.path()).unwrap_or(""),
+        });
+    }
 
     // A JS app shell: an empty mount point and almost no server-rendered text.
     let empty_mount = doc

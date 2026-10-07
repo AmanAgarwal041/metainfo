@@ -8,6 +8,7 @@ pub mod checks;
 pub mod crawlers;
 pub mod extract;
 pub mod generate;
+pub mod keywords;
 pub mod llms;
 pub mod model;
 pub mod robots;
@@ -28,6 +29,14 @@ pub fn analyze(input_json: &str) -> String {
             .unwrap_or_else(|e| serde_json::json!({ "error": e.to_string() }).to_string()),
         Err(e) => serde_json::json!({ "error": format!("Invalid scan input: {e}") }).to_string(),
     }
+}
+
+/// Count how often each term in `terms_json` (a JSON string array) appears in
+/// the page's main text. Returns a JSON number array in the same order.
+#[wasm_bindgen]
+pub fn term_counts(html: &str, terms_json: &str) -> String {
+    let terms: Vec<String> = serde_json::from_str(terms_json).unwrap_or_default();
+    serde_json::to_string(&extract::term_counts(html, &terms)).unwrap_or_else(|_| "[]".into())
 }
 
 #[wasm_bindgen]
