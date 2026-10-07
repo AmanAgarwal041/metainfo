@@ -4,6 +4,9 @@ import { diffSnapshots, type TrackedSite } from "@/lib/history";
 import { PLATFORM_META, type Platform, type Report } from "@/lib/types";
 import { PlatformChips, scoreColor, SeverityBadge } from "./ui";
 
+/** "a, b, c and 4 more" */
+const few = (xs: string[], n = 4) => (xs.length <= n ? xs.join(", ") : `${xs.slice(0, n).join(", ")} and ${xs.length - n} more`);
+
 export default function Overview({
   report,
   site,
@@ -29,9 +32,9 @@ export default function Overview({
         <div className="notice">
           <b>Since your last scan:</b> overall {delta >= 0 ? "+" : ""}
           {delta}.{" "}
-          {diff.fixed.length > 0 && <>Fixed: {diff.fixed.map(title).join(", ")}. </>}
+          {diff.fixed.length > 0 && <>Fixed: {few(diff.fixed.map(title))}. </>}
           {diff.regressed.length > 0 && (
-            <span style={{ color: "var(--fail)" }}>Regressed: {diff.regressed.map(title).join(", ")}.</span>
+            <span style={{ color: "var(--fail)" }}>Regressed: {few(diff.regressed.map(title))}.</span>
           )}
         </div>
       )}

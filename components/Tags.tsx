@@ -160,8 +160,8 @@ export default function Tags({ report }: { report: Report }) {
                   <tr key={i}>
                     <td className="break small" style={{ maxWidth: 380 }}>{img.src}</td>
                     <td className="small">{img.alt == null ? <span className="no">missing</span> : img.alt || <span className="muted">(decorative)</span>}</td>
-                    <td className="small">{img.width && img.height ? `${img.width}×${img.height}` : <span className="na">—</span>}</td>
-                    <td className="small">{img.loading ?? <span className="na">—</span>}</td>
+                    <td className="small">{img.width && img.height ? `${img.width}×${img.height}` : <span className="na">-</span>}</td>
+                    <td className="small">{img.loading ?? <span className="na">-</span>}</td>
                   </tr>
                 ))}
               </tbody>

@@ -15,7 +15,7 @@ function truncate(s: string, n: number) {
 
 function Len({ value, min, max }: { value: string; min: number; max: number }) {
   const n = [...value].length;
-  return <span className={n >= min && n <= max ? "len-ok" : "len-bad"}>{n} / {min}–{max}</span>;
+  return <span className={n >= min && n <= max ? "len-ok" : "len-bad"}>{n} / {min}-{max}</span>;
 }
 
 export default function Previews({ report }: { report: Report }) {

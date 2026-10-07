@@ -2,16 +2,12 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useProject } from "@/lib/project";
+import { PageHead } from "../kit";
 import { researchStatus, ResearchError, setToken } from "@/lib/research-client";
 import { bareDomain, LOCATIONS, type Intent, type ResearchStatus } from "@/lib/research-types";
 
 export function PageHeader({ title, sub }: { title: string; sub: string }) {
-  return (
-    <div style={{ padding: "28px 0 16px" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 750 }}>{title}</h1>
-      <p className="muted" style={{ marginTop: 6, maxWidth: 760 }}>{sub}</p>
-    </div>
-  );
+  return <PageHead title={title} sub={sub} />;
 }
 
 /** Your domain, competitors and market: shared by every research page. */
@@ -141,7 +137,7 @@ export function CostNote({ cost, cached, extra }: { cost: number; cached: boolea
 }
 
 export function Trend({ values }: { values: number[] }) {
-  if (values.length < 2) return <span className="na">—</span>;
+  if (values.length < 2) return <span className="na">-</span>;
   const max = Math.max(...values, 1);
   const w = 64;
   const h = 18;
@@ -154,7 +150,7 @@ export function Trend({ values }: { values: number[] }) {
 }
 
 export function KdBadge({ kd }: { kd: number | null }) {
-  if (kd == null) return <span className="na">—</span>;
+  if (kd == null) return <span className="na">-</span>;
   const color = kd < 30 ? "var(--pass)" : kd < 60 ? "var(--warn)" : "var(--fail)";
   return (
     <span className="kd" style={{ color, borderColor: color }}>
@@ -166,7 +162,7 @@ export function KdBadge({ kd }: { kd: number | null }) {
 const INTENT_SHORT: Record<Intent, string> = { informational: "I", navigational: "N", commercial: "C", transactional: "T" };
 
 export function IntentBadge({ intent }: { intent: Intent | null }) {
-  if (!intent) return <span className="na">—</span>;
+  if (!intent) return <span className="na">-</span>;
   return (
     <span className={`badge intent-${intent}`} title={intent}>
       {INTENT_SHORT[intent]}

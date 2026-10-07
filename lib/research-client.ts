@@ -53,7 +53,7 @@ export function toCsv(rows: Record<string, unknown>[]): string {
 }
 
 export function fmtNum(n: number | null | undefined): string {
-  if (n == null) return "—";
+  if (n == null) return "-";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 10_000) return `${Math.round(n / 1000)}K`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;

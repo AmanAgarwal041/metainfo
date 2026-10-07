@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { scanMany, type PageScan } from "@/lib/engine";
 import { useProject } from "@/lib/project";
-import { rankHistory, rankKey, recordRanks, trackedKeywords, type RankCheck } from "@/lib/rank-history";
+import { checkFromSerp, rankHistory, rankKey, recordRanks, trackedKeywords, type RankCheck } from "@/lib/rank-history";
 import { fmtNum, research } from "@/lib/research-client";
 import { bareDomain, locationByCode, type SerpResult } from "@/lib/research-types";
 import type { Report } from "@/lib/types";
@@ -76,7 +76,7 @@ function Benchmark({ scans, mineUrl }: { scans: PageScan[]; mineUrl: string | nu
                   <td>{row.label}</td>
                   <td style={{ textAlign: "right", fontWeight: 700 }}>{med.toLocaleString()}</td>
                   <td style={{ textAlign: "right" }} className="muted">
-                    {Math.min(...vals).toLocaleString()}–{Math.max(...vals).toLocaleString()}
+                    {Math.min(...vals).toLocaleString()}-{Math.max(...vals).toLocaleString()}
                   </td>
                   {mine && (
                     <td style={{ textAlign: "right", fontWeight: 600, color: yours != null && row.label !== "TTFB (ms)" && yours < med * 0.6 ? "var(--warn)" : undefined }}>
@@ -112,12 +112,12 @@ function Benchmark({ scans, mineUrl }: { scans: PageScan[]; mineUrl: string | nu
                 <td className="break small">
                   {s.url === mineUrl && <span className="badge accent">you</span>} {s.url}
                 </td>
-                <td style={{ textAlign: "right" }}>{s.report ? s.report.page.wordCount.toLocaleString() : "—"}</td>
+                <td style={{ textAlign: "right" }}>{s.report ? s.report.page.wordCount.toLocaleString() : "-"}</td>
                 <td style={{ textAlign: "right", fontWeight: 700, color: s.report ? scoreColor(s.report.summary.overall) : undefined }}>
                   {s.report ? s.report.summary.overall : <span className="na small">{s.error}</span>}
                 </td>
                 <td style={{ textAlign: "right" }}>
-                  <a className="btn btn-sm btn-ghost" href={`/?url=${encodeURIComponent(s.url)}`}>
+                  <a className="btn btn-sm btn-ghost" href={`/audit?url=${encodeURIComponent(s.url)}`}>
                     Audit →
                   </a>
                 </td>
@@ -218,7 +218,7 @@ function RankHistory({ checks, domains }: { checks: RankCheck[]; domains: string
                     const delta = p != null && q != null ? q - p : null;
                     return (
                       <td key={d} style={{ textAlign: "center", fontWeight: 600 }}>
-                        {p != null ? `#${p}` : <span className="na">—</span>}
+                        {p != null ? `#${p}` : <span className="na">-</span>}
                         {delta ? <span className="small" style={{ color: delta > 0 ? "var(--pass)" : "var(--fail)", marginLeft: 4 }}>{delta > 0 ? `▲${delta}` : `▼${-delta}`}</span> : null}
                       </td>
                     );
@@ -252,11 +252,7 @@ function LiveSerp() {
       try {
         const d = await research<SerpResult>("serp", { q: keyword.trim(), loc: project.location, device: dev });
         setData(d);
-        const positions: Record<string, number | null> = {};
-        for (const dom of domains) {
-          positions[dom] = d.organic.find((o) => o.domain === dom || o.domain.endsWith(`.${dom}`))?.position ?? null;
-        }
-        setHistory(recordRanks(rankKey(d.keyword, d.location, d.device), { checkedAt: d.checkedAt, positions }));
+        setHistory(recordRanks(rankKey(d.keyword, d.location, d.device), checkFromSerp(d, domains)));
         setTracked(trackedKeywords());
         const u = new URL(window.location.href);
         u.searchParams.set("q", keyword.trim());
@@ -343,7 +339,7 @@ function LiveSerp() {
           <div className="stat-tiles">
             <div className="stat">
               <div className="v" style={{ color: mine ? (mine.position <= 3 ? "var(--pass)" : mine.position <= 10 ? "var(--warn)" : undefined) : "var(--fail)" }}>
-                {mine ? `#${mine.position}` : project.domain ? "—" : "?"}
+                {mine ? `#${mine.position}` : project.domain ? "-" : "?"}
               </div>
               <div className="l">{project.domain ? `${project.domain} position${mine ? "" : " (not in top 20)"}` : "Set your site to see your position"}</div>
             </div>
@@ -418,7 +414,7 @@ function LiveSerp() {
                       <li key={p}>{p}</li>
                     ))}
                   </ul>
-                  <p className="muted small" style={{ marginTop: 6 }}>Answer these as H2/H3 questions with 1–2 sentence answers to target the box and AI answers.</p>
+                  <p className="muted small" style={{ marginTop: 6 }}>Answer these as H2/H3 questions with 1-2 sentence answers to target the box and AI answers.</p>
                 </div>
               )}
               {data.relatedSearches.length > 0 && (

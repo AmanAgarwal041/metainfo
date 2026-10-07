@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
-import { locationByCode } from "@/lib/research-types";
+import { locationByCode, type Location } from "@/lib/research-types";
 import { dataForSeoConfigured, ProviderError } from "./dataforseo";
 
 export class BadRequest extends Error {}
@@ -9,7 +9,7 @@ export class BadRequest extends Error {}
  * Wraps a research route: enforces the optional RESEARCH_TOKEN (so a public
  * deployment can't spend your DataForSEO balance) and turns errors into JSON.
  */
-export function researchRoute(fn: (req: NextRequest, ctx: { location: ReturnType<typeof locationByCode> }) => Promise<unknown>) {
+export function researchRoute(fn: (req: NextRequest, ctx: { location: Location }) => Promise<unknown>) {
   return async (req: NextRequest) => {
     const required = process.env.RESEARCH_TOKEN;
     if (required) {

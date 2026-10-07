@@ -1,5 +1,5 @@
 // Runs the same Rust/WASM engine server-side, for the JSON API (CI checks,
-// cron-based tracking) — the browser UI runs it client-side instead.
+// cron-based tracking): the browser UI runs it client-side instead.
 
 import fs from "node:fs/promises";
 import path from "node:path";

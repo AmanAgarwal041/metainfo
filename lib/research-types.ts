@@ -5,10 +5,10 @@ export type Intent = "informational" | "navigational" | "commercial" | "transact
 export interface KeywordMetrics {
   keyword: string;
   volume: number | null;
-  /** 0–100 */
+  /** 0-100 */
   difficulty: number | null;
   cpc: number | null;
-  /** 0–1 */
+  /** 0-1 */
   competition: number | null;
   intent: Intent | null;
   /** Oldest → newest monthly search volumes. */
@@ -177,7 +177,9 @@ export const LOCATIONS = [
   { code: 2392, name: "Japan", gl: "jp", lang: "ja" },
 ] as const;
 
-export function locationByCode(code: number) {
+export type Location = (typeof LOCATIONS)[number];
+
+export function locationByCode(code: number): Location {
   return LOCATIONS.find((l) => l.code === code) ?? LOCATIONS[0];
 }
 
@@ -190,4 +192,23 @@ export function bareDomain(input: string): string {
   } catch {
     return s.replace(/^www\./, "").split("/")[0];
   }
+}
+
+export type AiEngine = "chatgpt" | "claude" | "gemini" | "perplexity" | "google";
+
+export const AI_ENGINES: { id: AiEngine; label: string; color: string }[] = [
+  { id: "google", label: "Google AI Overview", color: "var(--series-1)" },
+  { id: "chatgpt", label: "ChatGPT", color: "var(--series-3)" },
+  { id: "perplexity", label: "Perplexity", color: "var(--series-4)" },
+  { id: "claude", label: "Claude", color: "var(--series-5)" },
+  { id: "gemini", label: "Gemini", color: "var(--series-6)" },
+];
+
+export interface AiAnswer extends Paid {
+  engine: AiEngine;
+  model: string;
+  prompt: string;
+  answered: boolean;
+  text: string;
+  sources: { url: string; domain: string; title: string }[];
 }

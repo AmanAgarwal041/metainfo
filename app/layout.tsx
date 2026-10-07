@@ -1,25 +1,35 @@
 import type { Metadata, Viewport } from "next";
+import { Hanken_Grotesk, JetBrains_Mono } from "next/font/google";
+import Shell from "@/components/Shell";
+import { THEME_BOOT } from "@/lib/theme";
 import "./globals.css";
-import Nav from "@/components/Nav";
+
+const sans = Hanken_Grotesk({ subsets: ["latin"], variable: "--font-hanken", display: "swap" });
+const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jetbrains", display: "swap" });
 
 export const metadata: Metadata = {
-  title: { default: "MetaInfo — SEO & AI visibility", template: "%s · MetaInfo" },
+  title: { default: "MetaInfo: SEO and AI visibility", template: "%s | MetaInfo" },
   description:
-    "Scan any page the way Google, Bing, ChatGPT, Perplexity, Claude and Gemini see it. Find missing tags, crawler blocks, sitemap and robots issues, then get a prioritised fix plan and track progress.",
-  icons: { icon: "/favicon.ico" },
+    "Audit any page the way Google, Bing, ChatGPT, Perplexity, Claude and Gemini see it, research keywords and competitors, track rankings and AI answers, and work through a prioritised fix plan.",
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f6f7fa" },
+    { media: "(prefers-color-scheme: dark)", color: "#121317" },
+  ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${sans.variable} ${mono.variable}`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
+      </head>
       <body>
-        <Nav />
-        {children}
+        <Shell>{children}</Shell>
       </body>
     </html>
   );

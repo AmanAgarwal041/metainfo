@@ -82,7 +82,7 @@ impl Robots {
                     last_was_agent = false;
                     match current.as_mut() {
                         Some(g) => {
-                            // An empty Disallow means "allow everything" — no rule.
+                            // An empty Disallow means "allow everything": no rule.
                             if !val.is_empty() {
                                 g.rules.push(Rule { allow: key == "allow", pattern: val });
                             }
@@ -112,7 +112,7 @@ impl Robots {
                 "noindex" | "nofollow" => {
                     last_was_agent = false;
                     r.warnings.push(format!(
-                        "Line {}: `{}` in robots.txt is unsupported — use meta robots or X-Robots-Tag",
+                        "Line {}: `{}` in robots.txt is unsupported: use meta robots or X-Robots-Tag",
                         n + 1,
                         k.trim()
                     ));

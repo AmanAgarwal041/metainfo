@@ -115,7 +115,7 @@ pub fn analyze(resources: &[Resource], page_url: &str, robots_sitemaps: &[String
             src.url_count = locs.len();
             r.url_count += locs.len();
             if locs.len() > MAX_URLS {
-                r.issues.push(format!("{} has {} URLs — the limit is 50,000 per file", res.url, locs.len()));
+                r.issues.push(format!("{} has {} URLs: the limit is 50,000 per file", res.url, locs.len()));
             }
             for loc in &locs {
                 let loc = decode(loc);
@@ -143,7 +143,7 @@ pub fn analyze(resources: &[Resource], page_url: &str, robots_sitemaps: &[String
 
     r.found = r.sources.iter().any(|s| s.kind == "urlset" || s.kind == "index");
     if r.found && r.url_count > 0 && r.lastmod_count == 0 {
-        r.issues.push("No <lastmod> dates — search and AI engines use them to prioritise fresh content".into());
+        r.issues.push("No <lastmod> dates: search and AI engines use them to prioritise fresh content".into());
     }
     r.contains_page = if saw_page {
         Some(true)

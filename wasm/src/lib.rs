@@ -1,6 +1,6 @@
 //! MetaInfo scan engine. The host (browser or Node) fetches the page and its
-//! companion files, then hands a JSON bundle to [`analyze`]; everything else —
-//! parsing, rules, scoring, the fix plan and generated files — happens here.
+//! companion files, then hands a JSON bundle to [`analyze`]; everything else -
+//! parsing, rules, scoring, the fix plan and generated files: happens here.
 
 use wasm_bindgen::prelude::*;
 
@@ -98,7 +98,7 @@ pub fn analyze_input(input: &ScanInput) -> Report {
     let crawlers = if html_only {
         vec![]
     } else {
-        // A missing robots.txt (404) means "allow all" — evaluate against an empty file.
+        // A missing robots.txt (404) means "allow all": evaluate against an empty file.
         let rb = robots_parsed.clone().or_else(|| input.robots.as_ref().map(|_| robots::Robots::default()));
         crawlers::evaluate(rb.as_ref(), &path, &input.bot_probes)
     };

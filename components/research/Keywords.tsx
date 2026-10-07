@@ -30,7 +30,7 @@ const GROUPS: { id: KeywordRow["group"] | "all"; label: string }[] = [
   { id: "other", label: "Other" },
 ];
 
-/** 0–100: high volume and low difficulty is the best opportunity. */
+/** 0-100: high volume and low difficulty is the best opportunity. */
 function opportunity(r: KeywordRow): number | null {
   if (r.volume == null || r.difficulty == null) return null;
   const vol = Math.min(1, Math.log10(r.volume + 1) / 5);
@@ -38,7 +38,7 @@ function opportunity(r: KeywordRow): number | null {
 }
 
 export default function Keywords() {
-  const [project] = useProject();
+  const [project, updateProject] = useProject();
   const status = useResearchStatus();
   const [seed, setSeed] = useState("");
   const [data, setData] = useState<KeywordResearch | null>(null);
@@ -113,8 +113,8 @@ export default function Keywords() {
     ...(hasMetrics
       ? ([
           { key: "volume", label: "Volume", align: "right", sort: (r) => r.volume, render: (r) => <b>{fmtNum(r.volume)}</b>, title: "Average monthly searches" },
-          { key: "kd", label: "KD", align: "center", sort: (r) => r.difficulty, render: (r) => <KdBadge kd={r.difficulty} />, title: "Keyword difficulty (0–100)" },
-          { key: "cpc", label: "CPC", align: "right", sort: (r) => r.cpc, render: (r) => (r.cpc != null ? `$${r.cpc.toFixed(2)}` : "—") },
+          { key: "kd", label: "KD", align: "center", sort: (r) => r.difficulty, render: (r) => <KdBadge kd={r.difficulty} />, title: "Keyword difficulty (0-100)" },
+          { key: "cpc", label: "CPC", align: "right", sort: (r) => r.cpc, render: (r) => (r.cpc != null ? `$${r.cpc.toFixed(2)}` : "-") },
           { key: "intent", label: "Intent", align: "center", sort: (r) => r.intent, render: (r) => <IntentBadge intent={r.intent} /> },
           { key: "trend", label: "12-mo trend", render: (r) => <Trend values={r.trend} /> },
           {
@@ -122,8 +122,8 @@ export default function Keywords() {
             label: "Opportunity",
             align: "right",
             sort: (r) => opportunity(r),
-            render: (r) => opportunity(r) ?? "—",
-            title: "High volume × low difficulty, 0–100",
+            render: (r) => opportunity(r) ?? "-",
+            title: "High volume × low difficulty, 0-100",
           },
         ] as Column<KeywordRow>[])
       : []),
@@ -132,9 +132,18 @@ export default function Keywords() {
       label: "",
       align: "right",
       render: (r) => (
-        <Link className="btn btn-sm btn-ghost" href={`/serp?q=${encodeURIComponent(r.keyword)}`}>
-          SERP →
-        </Link>
+        <span className="row" style={{ gap: 4, justifyContent: "flex-end", flexWrap: "nowrap" }}>
+          {project.keywords.includes(r.keyword) ? (
+            <span className="badge accent">tracked</span>
+          ) : (
+            <button className="btn btn-sm" onClick={() => updateProject({ keywords: [...project.keywords, r.keyword] })} disabled={!project.id}>
+              Track
+            </button>
+          )}
+          <Link className="btn btn-sm btn-ghost" href={`/serp?q=${encodeURIComponent(r.keyword)}`}>
+            SERP
+          </Link>
+        </span>
       ),
     },
   ];
@@ -195,11 +204,11 @@ export default function Keywords() {
                   <div className="l">Keyword difficulty</div>
                 </div>
                 <div className="stat">
-                  <div className="v">{data.seedMetrics.cpc != null ? `$${data.seedMetrics.cpc.toFixed(2)}` : "—"}</div>
+                  <div className="v">{data.seedMetrics.cpc != null ? `$${data.seedMetrics.cpc.toFixed(2)}` : "-"}</div>
                   <div className="l">Cost per click</div>
                 </div>
                 <div className="stat">
-                  <div className="v" style={{ textTransform: "capitalize", fontSize: 18 }}>{data.seedMetrics.intent ?? "—"}</div>
+                  <div className="v" style={{ textTransform: "capitalize", fontSize: 18 }}>{data.seedMetrics.intent ?? "-"}</div>
                   <div className="l">Search intent</div>
                 </div>
               </div>

@@ -45,6 +45,44 @@ RESEARCH_TOKEN=some-secret                # strongly recommended when deployed
 * With `RESEARCH_TOKEN` set, `/api/research/*` requires it (the UI asks for it once), so a public deployment can't spend your balance.
 * `DATAFORSEO_API_URL=https://sandbox.dataforseo.com/v3/` uses DataForSEO's free sandbox (dummy data) for testing.
 
+## Workspace
+
+* **Projects:** each holds a domain, brand name, up to 5 competitors, a market, tracked keywords and AI prompts. The sidebar switcher scopes every page to the active project.
+* **Dashboard (`/`):** audit score and trend per platform, AI search readiness, average position and its distribution, AI answer mention rate, next fixes, and a setup checklist.
+* **Rank tracking (`/rankings`):** desktop or mobile positions for the project's keywords and competitors, plus whether an AI Overview cites you.
+  * Before each run it shows a cost estimate and asks you to confirm.
+  * Results include movement, a position distribution, per-keyword history charts and a "by date" matrix for reports.
+* **AI visibility (`/ai-visibility`):** sends your prompts to ChatGPT, Claude, Gemini and Perplexity (DataForSEO `ai_optimization/{engine}/llm_responses/live`, with web search) and checks Google AI Overviews.
+  * Matching runs in code, with no LLM judge. "Mentioned" is a whole-word match on your brand or domain (URLs masked). "Cited" means a source URL is on your domain. Competitors are scored the same way.
+  * Results show mention and citation rates, competitor gaps, cited sources, the full answer with your brand highlighted, and a trend across runs.
+  * The free part is AI readiness from your latest audit.
+* **Settings (`/settings`):** projects, data source status, MCP connection snippets, theme, and backup export, import and reset.
+* **Command palette (⌘K):** jump to any page, audit a URL, research a keyword, check a SERP, switch or create projects, change theme.
+
+## MCP server
+
+`/api/mcp` implements MCP over Streamable HTTP. It's stateless JSON-RPC, protected by `RESEARCH_TOKEN` when that's set.
+
+```bash
+claude mcp add --transport http metainfo http://localhost:3000/api/mcp
+```
+
+Tools:
+* Free: `audit_page`, and `keyword_ideas` (ideas only; volumes need DataForSEO).
+* Need DataForSEO: `serp_check`, `keyword_gap`, `find_competitors`, `backlinks`, `ask_ai_engine`. These are hidden from the tool list until it's configured.
+
+## Design system
+
+The UI is built as an "operate" surface: dense, scannable, quiet.
+
+* **Color:** OKLCH tokens, with neutrals tinted toward a single cobalt accent. Light and dark are composed separately, not inverted, and you can pick light, dark or system.
+* **Type:** Hanken Grotesk for UI text and JetBrains Mono for code. Tables use tabular figures.
+* **Layout:** hairline separation instead of shadows, no nested cards, and a bento dashboard with only as many cells as there's data for.
+* **Glass:** the only "morphism" is glass on the sticky top bar and the command palette, with a solid fallback under `prefers-reduced-transparency`.
+* **Motion:** 120-300ms on `cubic-bezier(0.16, 1, 0.3, 1)`, honoring `prefers-reduced-motion`.
+* **Charts:** they use the validated categorical palette, with one fixed color per platform across the app. They have a crosshair tooltip, a legend and a table view. Ordered buckets use a single-hue ramp.
+* **Empty states:** a single-stroke figure in the Hairline manner that answers the pointer.
+
 ## Architecture
 
 ```

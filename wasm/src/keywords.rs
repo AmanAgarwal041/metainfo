@@ -1,4 +1,4 @@
-//! On-page keyword extraction: the words and 2–3 word phrases a page is
+//! On-page keyword extraction: the words and 2-3 word phrases a page is
 //! actually about, weighted by where they appear (title, H1, headings,
 //! description, URL) as well as how often. Feeds the keyword gap.
 
@@ -224,7 +224,7 @@ fn is_stop(w: &str) -> bool {
 /// span a sentence or list boundary.
 fn segments(text: &str) -> Vec<Vec<String>> {
     let mut out = Vec::new();
-    for seg in text.split(|c: char| ".,!?;:()[]{}|/\\\"“”«»—–·•→>\n\t".contains(c)) {
+    for seg in text.split(|c: char| ".,!?;:()[]{}|/\\\"“”«»--·•→>\n\t".contains(c)) {
         let words: Vec<String> = seg
             .split(|c: char| !(c.is_alphanumeric() || c == '\'' || c == '-' || c == '+'))
             .map(|w| w.trim_matches(|c: char| c == '\'' || c == '-').to_lowercase())

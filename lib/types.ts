@@ -221,13 +221,13 @@ export interface Report {
 }
 
 export const PLATFORM_META: Record<Platform, { label: string; short: string; color: string }> = {
-  google: { label: "Google", short: "Google", color: "#3b82f6" },
-  bing: { label: "Bing", short: "Bing", color: "#0891b2" },
-  chatgpt: { label: "ChatGPT", short: "ChatGPT", color: "#16a34a" },
-  perplexity: { label: "Perplexity", short: "Perplexity", color: "#64748b" },
-  claude: { label: "Claude", short: "Claude", color: "#d97706" },
-  gemini: { label: "Gemini / AI Overviews", short: "Gemini", color: "#9333ea" },
-  social: { label: "Social sharing", short: "Social", color: "#db2777" },
+  google: { label: "Google", short: "Google", color: "var(--series-1)" },
+  bing: { label: "Bing", short: "Bing", color: "var(--series-2)" },
+  chatgpt: { label: "ChatGPT", short: "ChatGPT", color: "var(--series-3)" },
+  perplexity: { label: "Perplexity", short: "Perplexity", color: "var(--series-4)" },
+  claude: { label: "Claude", short: "Claude", color: "var(--series-5)" },
+  gemini: { label: "Gemini / AI Overviews", short: "Gemini", color: "var(--series-6)" },
+  social: { label: "Social sharing", short: "Social", color: "var(--series-7)" },
 };
 
 export const PLATFORMS: Platform[] = ["google", "bing", "chatgpt", "perplexity", "claude", "gemini", "social"];

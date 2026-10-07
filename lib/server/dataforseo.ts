@@ -87,6 +87,23 @@ export async function call(path: string, task: Record<string, unknown>): Promise
   return { result, cost, cached: false };
 }
 
+/** GET a free catalog endpoint (e.g. model lists), cached for a day. */
+export async function getCatalog(path: string): Promise<Json> {
+  if (!dataForSeoConfigured()) throw new ProviderError("DataForSEO isn't configured.", 501);
+  const key = `GET|${path}`;
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < 24 * 60 * 60 * 1000) return hit.result;
+  const auth = Buffer.from(`${process.env.DATAFORSEO_LOGIN}:${process.env.DATAFORSEO_PASSWORD}`).toString("base64");
+  const res = await fetch(BASE + path, { headers: { authorization: `Basic ${auth}` }, signal: AbortSignal.timeout(30_000) });
+  const body: Json = await res.json().catch(() => null);
+  if (!body || body.status_code !== 20000) {
+    throw new ProviderError(FRIENDLY[body?.status_code ?? 0] ?? `DataForSEO error ${body?.status_code}: ${body?.status_message ?? res.status}`, 502, body?.status_code);
+  }
+  const result = body.tasks?.[0]?.result ?? null;
+  cache.set(key, { at: Date.now(), result, cost: 0 });
+  return result;
+}
+
 // ---------------------------------------------------------------- normalisers
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);

@@ -55,7 +55,7 @@ function RankingGap() {
         #{r.positions[d]}
       </a>
     ) : (
-      <span className="na">—</span>
+      <span className="na">-</span>
     );
   const columns: Column<GapRow>[] = data
     ? [

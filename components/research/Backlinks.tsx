@@ -9,14 +9,14 @@ import { CostNote, ErrorBox, PageHeader, ProjectBar, ProviderNotice, SortTable, 
 
 /** DataForSEO dates look like "2019-03-01 00:00:00 +00:00", which not every browser parses. */
 const date = (s: string | null) => {
-  if (!s) return "—";
+  if (!s) return "-";
   const d = new Date(s.replace(/^(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d) ?([+-]\d\d:\d\d)$/, "$1T$2$3"));
   return Number.isNaN(d.getTime()) ? s.slice(0, 10) : d.toLocaleDateString();
 };
 
 function SummaryTable({ rows, you }: { rows: BacklinkSummary[]; you: string }) {
   const metrics: { label: string; v: (s: BacklinkSummary) => number | null; fmt?: (n: number) => string }[] = [
-    { label: "Domain rank (0–1000)", v: (s) => s.rank },
+    { label: "Domain rank (0-1000)", v: (s) => s.rank },
     { label: "Backlinks", v: (s) => s.backlinks, fmt: fmtNum },
     { label: "Referring domains", v: (s) => s.referringDomains, fmt: fmtNum },
     { label: "Referring IPs", v: (s) => s.referringIps, fmt: fmtNum },
@@ -45,7 +45,7 @@ function SummaryTable({ rows, you }: { rows: BacklinkSummary[]; you: string }) {
                 const v = m.v(r);
                 return (
                   <td key={r.target} style={{ fontWeight: 700 }}>
-                    {v == null ? "—" : m.fmt ? m.fmt(v) : v}
+                    {v == null ? "-" : m.fmt ? m.fmt(v) : v}
                   </td>
                 );
               })}
@@ -78,7 +78,7 @@ export default function Backlinks() {
 
   const domainCols: Column<ReferringDomain>[] = [
     { key: "d", label: "Referring domain", sort: (r) => r.domain, render: (r) => <a href={`https://${r.domain}`} target="_blank" rel="noreferrer">{r.domain}</a> },
-    { key: "rank", label: "Rank", align: "right", sort: (r) => r.rank, render: (r) => r.rank ?? "—" },
+    { key: "rank", label: "Rank", align: "right", sort: (r) => r.rank, render: (r) => r.rank ?? "-" },
     { key: "bl", label: "Backlinks", align: "right", sort: (r) => r.backlinks, render: (r) => fmtNum(r.backlinks) },
     { key: "fs", label: "First seen", sort: (r) => r.firstSeen, render: (r) => date(r.firstSeen) },
   ];
@@ -101,14 +101,14 @@ export default function Backlinks() {
     { key: "anchor", label: "Anchor", render: (r) => <span className="small">{r.anchor || <i className="muted">(none)</i>}</span> },
     { key: "to", label: "To", render: (r) => <span className="break small muted">{r.urlTo.replace(/^https?:\/\//, "")}</span> },
     { key: "follow", label: "Type", align: "center", sort: (r) => Number(r.dofollow), render: (r) => (r.dofollow ? <span className="badge gain">dofollow</span> : <span className="badge">nofollow</span>) },
-    { key: "rank", label: "DR", align: "right", sort: (r) => r.domainRank, render: (r) => r.domainRank ?? "—", title: "Linking domain's rank" },
+    { key: "rank", label: "DR", align: "right", sort: (r) => r.domainRank, render: (r) => r.domainRank ?? "-", title: "Linking domain's rank" },
     { key: "fs", label: "First seen", sort: (r) => r.firstSeen, render: (r) => <span className="small">{date(r.firstSeen)} {r.isNew && <span className="badge gain">new</span>}{r.isLost && <span className="badge sev-critical">lost</span>}</span> },
   ];
   const gapCols = (comps: string[]): Column<LinkGapRow>[] => [
     { key: "d", label: "Domain", sort: (r) => r.domain, render: (r) => <a href={`https://${r.domain}`} target="_blank" rel="noreferrer">{r.domain}</a> },
-    { key: "rank", label: "Rank", align: "right", sort: (r) => r.rank, render: (r) => r.rank ?? "—" },
+    { key: "rank", label: "Rank", align: "right", sort: (r) => r.rank, render: (r) => r.rank ?? "-" },
     { key: "n", label: "Links to # competitors", align: "center", sort: (r) => Object.keys(r.linksTo).length, render: (r) => Object.keys(r.linksTo).length },
-    ...comps.map((c): Column<LinkGapRow> => ({ key: c, label: c, align: "right", sort: (r) => r.linksTo[c] ?? 0, render: (r) => (r.linksTo[c] ? fmtNum(r.linksTo[c]) : <span className="na">—</span>) })),
+    ...comps.map((c): Column<LinkGapRow> => ({ key: c, label: c, align: "right", sort: (r) => r.linksTo[c] ?? 0, render: (r) => (r.linksTo[c] ? fmtNum(r.linksTo[c]) : <span className="na">-</span>) })),
   ];
 
   return (

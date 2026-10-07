@@ -142,12 +142,12 @@ export default function Home({
                       {s.key}
                     </a>
                     <div className="muted small">
-                      {s.snapshots.length} scan{s.snapshots.length === 1 ? "" : "s"} · last {last ? new Date(last.scannedAt).toLocaleString() : "—"}
+                      {s.snapshots.length} scan{s.snapshots.length === 1 ? "" : "s"} · last {last ? new Date(last.scannedAt).toLocaleString() : "-"}
                     </div>
                   </div>
                   <Sparkline values={s.snapshots.map((x) => x.overall)} />
                   <div style={{ fontWeight: 700, fontSize: 18, color: scoreColor(last?.overall ?? 0) }}>
-                    {last?.overall ?? "—"}
+                    {last?.overall ?? "-"}
                     {delta !== 0 && (
                       <span className="small" style={{ marginLeft: 4, color: delta > 0 ? "var(--pass)" : "var(--fail)" }}>
                         {delta > 0 ? "+" : ""}

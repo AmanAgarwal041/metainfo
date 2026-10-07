@@ -57,7 +57,7 @@ pub fn analyze(res: &Resource) -> LlmsReport {
         r.issues.push("No `> summary` blockquote describing the site".into());
     }
     if r.link_count == 0 {
-        r.issues.push("No markdown links to key pages — LLMs use these to find your best content".into());
+        r.issues.push("No markdown links to key pages: LLMs use these to find your best content".into());
     }
     r
 }

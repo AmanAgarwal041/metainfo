@@ -3,7 +3,7 @@
 // Stored in localStorage (per browser). The /api/report endpoint covers
 // server-side/CI tracking.
 
-import type { Platform, Report, Status } from "@/lib/types";
+import type { CategoryScore, PlanPhase, Platform, Report, Status } from "@/lib/types";
 
 export type TaskState = "todo" | "doing" | "done" | "skipped";
 
@@ -23,6 +23,14 @@ export interface TrackedSite {
   title?: string | null;
   snapshots: Snapshot[];
   tasks: Record<string, { state: TaskState; updatedAt: string }>;
+  /** Compact copy of the latest report, for the dashboard. */
+  latest?: {
+    plan: PlanPhase[];
+    categories: CategoryScore[];
+    blockedCrawlers: string[];
+    llms: boolean;
+    titles: Record<string, string>;
+  };
 }
 
 const STORAGE_KEY = "metainfo:sites:v1";
@@ -74,6 +82,13 @@ export function recordScan(report: Report): TrackedSite {
   site.url = report.finalUrl || report.url;
   site.title = report.page.title;
   site.snapshots = [...site.snapshots, snapshotOf(report)].slice(-MAX_SNAPSHOTS);
+  site.latest = {
+    plan: report.plan,
+    categories: report.categories,
+    blockedCrawlers: report.crawlers.filter((c) => !c.allowed && c.purpose !== "training").map((c) => c.name),
+    llms: Boolean(report.llms?.found),
+    titles: Object.fromEntries(report.checks.map((c) => [c.id, c.title])),
+  };
   const now = new Date().toISOString();
   for (const c of report.checks) {
     const t = site.tasks[c.id];
@@ -114,4 +129,17 @@ export function diffSnapshots(prev: Snapshot | undefined, next: Snapshot): Diff 
     regressed: ids.filter((id) => prev.statuses[id] === "pass" && bad(next.statuses[id])),
     stillFailing: ids.filter((id) => bad(prev.statuses[id]) && bad(next.statuses[id])),
   };
+}
+
+/** The tracked site that best matches a project's domain (its homepage first). */
+export function siteForDomain(sites: Record<string, TrackedSite>, domain: string): TrackedSite | null {
+  if (!domain) return null;
+  const all = Object.values(sites);
+  return (
+    sites[`${domain}/`] ??
+    all
+      .filter((s) => s.key === domain || s.key.startsWith(`${domain}/`))
+      .sort((a, b) => (b.snapshots.at(-1)?.scannedAt ?? "").localeCompare(a.snapshots.at(-1)?.scannedAt ?? ""))[0] ??
+    null
+  );
 }

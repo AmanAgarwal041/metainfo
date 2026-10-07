@@ -1,5 +1,5 @@
 //! The rule set. Each check states which platforms it affects, how severe a
-//! failure is, roughly how much effort a fix takes, and — where possible — a
+//! failure is, roughly how much effort a fix takes, and: where possible: a
 //! fix generated from the page's own content.
 
 use crate::crawlers::{CrawlerAccess, Purpose};
@@ -132,7 +132,7 @@ fn indexability(cx: &Ctx, v: &mut Vec<Check>) {
     let c = new("http-status", Cat::Indexability, "Page returns HTTP 200", Sev::Critical, E::Medium, ALL_ENGINES,
         "Only pages that return 200 are indexed and cited. 4xx/5xx pages are dropped from Google, Bing and every AI index.");
     v.push(match cx.input.status {
-        None => c.info("Pasted HTML — no HTTP response to check."),
+        None => c.info("Pasted HTML: no HTTP response to check."),
         Some(200) => c.pass("The page responded 200 OK."),
         Some(s) if (200..300).contains(&s) => {
             c.warn(format!("The page responded {s}."), "Serve the canonical version of this page with a plain 200 OK.")
@@ -165,7 +165,7 @@ fn indexability(cx: &Ctx, v: &mut Vec<Check>) {
         "Each hop costs crawl budget and delays rendering; Google follows up to 10 hops but recommends going directly to the destination.");
     let r = &cx.input.redirects;
     v.push(if cx.html_only {
-        c.info("Pasted HTML — no redirects to check.")
+        c.info("Pasted HTML: no redirects to check.")
     } else if r.is_empty() {
         c.pass("No redirects.")
     } else {
@@ -188,7 +188,7 @@ fn indexability(cx: &Ctx, v: &mut Vec<Check>) {
 
     let d = robots_directives(cx);
     let c = new("noindex", Cat::Indexability, "Page is indexable", Sev::Critical, E::Low, ALL_ENGINES,
-        "`noindex` (meta robots or X-Robots-Tag) removes the page from Google and Bing — and ChatGPT search is built on Bing’s index.");
+        "`noindex` (meta robots or X-Robots-Tag) removes the page from Google and Bing: and ChatGPT search is built on Bing’s index.");
     v.push(if d.iter().any(|x| x == "noindex" || x == "none") {
         c.fail(
             "A `noindex` directive is set on this page.",
@@ -242,14 +242,14 @@ fn indexability(cx: &Ctx, v: &mut Vec<Check>) {
                 if normalize(one) == normalize(u.as_str()) || cx.html_only {
                     c.pass(format!("Self-referencing canonical: {one}"))
                 } else {
-                    c.warn(format!("Canonical points elsewhere: {one}"), "This page asks to be indexed as another URL. That's correct for duplicates — otherwise make it self-referencing.")
+                    c.warn(format!("Canonical points elsewhere: {one}"), "This page asks to be indexed as another URL. That's correct for duplicates: otherwise make it self-referencing.")
                         .code("html", canon_snippet)
                 }
             } else {
                 c.pass(format!("Canonical: {one}"))
             }
         }
-        many => c.fail(format!("{} different canonicals: {}", many.len(), many.join(", ")), "Keep exactly one canonical — Google ignores all of them when they conflict.").code("html", canon_snippet),
+        many => c.fail(format!("{} different canonicals: {}", many.len(), many.join(", ")), "Keep exactly one canonical: Google ignores all of them when they conflict.").code("html", canon_snippet),
     });
 
     let c = new(
@@ -262,12 +262,12 @@ fn indexability(cx: &Ctx, v: &mut Vec<Check>) {
         "Every crawler reads /robots.txt first. A 5xx response makes Google stop crawling the whole site.",
     );
     v.push(match cx.robots {
-        _ if cx.html_only => c.info("Pasted HTML — robots.txt not fetched."),
+        _ if cx.html_only => c.info("Pasted HTML: robots.txt not fetched."),
         None => c.info("robots.txt was not fetched."),
         Some(r) if r.found && r.warnings.is_empty() => c.pass(format!("Found, with {} and {}.", plural(r.agents.len(), "user-agent group", "user-agent groups"), plural(r.sitemaps.len(), "sitemap", "sitemaps"))),
-        Some(r) if r.found => c.warn(format!("Found, with {}: {}", plural(r.warnings.len(), "problem", "problems"), r.warnings.join("; ")), "Clean up the flagged lines — unknown directives are ignored silently."),
+        Some(r) if r.found => c.warn(format!("Found, with {}: {}", plural(r.warnings.len(), "problem", "problems"), r.warnings.join("; ")), "Clean up the flagged lines: unknown directives are ignored silently."),
         Some(r) if matches!(r.status, Some(s) if s >= 500) => c.fail(format!("robots.txt returned {}.", r.status.unwrap_or(0)), "Google treats a 5xx robots.txt as “disallow everything”. Make it return 200 (or 404 if you have no rules)."),
-        Some(_) => c.warn("No robots.txt (404).", "Crawlers will allow everything, but add one to declare your sitemap and AI-crawler policy explicitly — see Generated files."),
+        Some(_) => c.warn("No robots.txt (404).", "Crawlers will allow everything, but add one to declare your sitemap and AI-crawler policy explicitly: see Generated files."),
     });
 
     access(
@@ -320,7 +320,7 @@ fn indexability(cx: &Ctx, v: &mut Vec<Check>) {
         "Sitemaps help crawlers find every page and, with <lastmod>, prioritise fresh content.",
     );
     v.push(match cx.sitemap {
-        _ if cx.html_only => c.info("Pasted HTML — sitemap not fetched."),
+        _ if cx.html_only => c.info("Pasted HTML: sitemap not fetched."),
         None => c.info("No sitemap fetched."),
         Some(s) if !s.found => c.fail("No valid XML sitemap at the robots.txt location or /sitemap.xml.", "Publish a sitemap listing your canonical URLs with <lastmod>, then submit it in Google Search Console and Bing Webmaster Tools.")
             .code("xml", format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n  <url>\n    <loc>{}</loc>\n    <lastmod>YYYY-MM-DD</lastmod>\n  </url>\n</urlset>", cx.sugg.canonical.clone().unwrap_or_default())),
@@ -328,8 +328,15 @@ fn indexability(cx: &Ctx, v: &mut Vec<Check>) {
         Some(s) => c.pass(format!("Found: {}, {}{}.", plural(s.url_count, "URL", "URLs"), plural(s.child_sitemaps.len(), "child sitemap", "child sitemaps"), s.latest_lastmod.as_ref().map(|l| format!(", latest lastmod {l}")).unwrap_or_default())),
     });
 
-    let c = new("sitemap-robots", Cat::Indexability, "Sitemap declared in robots.txt", Sev::Low, E::Low, &[Google, Bing, Perplexity, ChatGPT],
-        "A `Sitemap:` line lets every crawler — including AI ones that never see Search Console — discover your sitemap.");
+    let c = new(
+        "sitemap-robots",
+        Cat::Indexability,
+        "Sitemap declared in robots.txt",
+        Sev::Low,
+        E::Low,
+        &[Google, Bing, Perplexity, ChatGPT],
+        "A `Sitemap:` line lets every crawler: including AI ones that never see Search Console: discover your sitemap.",
+    );
     let sm_line = format!("Sitemap: {}/sitemap.xml", cx.sugg.origin.clone().unwrap_or_default());
     v.push(match (cx.robots, cx.html_only) {
         (_, true) | (None, _) => c.info("robots.txt not fetched."),
@@ -355,7 +362,7 @@ fn indexability(cx: &Ctx, v: &mut Vec<Check>) {
                 "This URL is not in the sitemap.",
                 "Add this page's canonical URL to your sitemap (unless it shouldn't be indexed).",
             ),
-            None => c.info("Sitemap index has more child sitemaps than we fetched — couldn't confirm."),
+            None => c.info("Sitemap index has more child sitemaps than we fetched: couldn't confirm."),
         },
         _ => c.info("No sitemap to check."),
     });
@@ -372,7 +379,7 @@ fn indexability(cx: &Ctx, v: &mut Vec<Check>) {
     let c = new("hreflang", Cat::Indexability, "hreflang alternates", Sev::Low, E::Medium, &[Google, Bing],
         "For multi-language sites, hreflang serves the right language version in each market. Annotations must include the page itself and be reciprocal.");
     v.push(if p.hreflang.is_empty() {
-        c.info("No hreflang — fine for a single-language site.")
+        c.info("No hreflang: fine for a single-language site.")
     } else {
         let mut problems = Vec::new();
         if !p.hreflang.iter().any(|h| h.lang.eq_ignore_ascii_case("x-default")) {
@@ -426,16 +433,16 @@ fn access(
         find(primary).iter().chain(find(secondary).iter()).map(|a| a.name).collect::<Vec<_>>().join("\nUser-agent: ")
     );
     let check = if cx.html_only || cx.crawlers.is_empty() {
-        c.info("Pasted HTML — crawler access not checked.")
+        c.info("Pasted HTML: crawler access not checked.")
     } else if !blocked_primary.is_empty() {
         c.fail(format!("{}.", blocked_primary.join("; ")),
-            format!("Allow {} in robots.txt and make sure your CDN/WAF bot rules don't block it — otherwise {} can't index or cite this page.", names(primary), platform.label()))
+            format!("Allow {} in robots.txt and make sure your CDN/WAF bot rules don't block it: otherwise {} can't index or cite this page.", names(primary), platform.label()))
             .code("text", fix_rule)
     } else if !blocked_secondary.is_empty() {
         c.warn(
             format!("{}.", blocked_secondary.join("; ")),
             format!(
-                "{} fetches pages live when users ask about them — unblock it to be read in real time.",
+                "{} fetches pages live when users ask about them: unblock it to be read in real time.",
                 names(secondary)
             ),
         )
@@ -483,7 +490,7 @@ fn meta(cx: &Ctx, v: &mut Vec<Check>) {
             .code("html", title_snip.clone()),
     });
 
-    let c = new("title-length", Cat::Meta, "Title length (30–60 chars)", Sev::Medium, E::Low, &[Google, Bing, Social],
+    let c = new("title-length", Cat::Meta, "Title length (30-60 chars)", Sev::Medium, E::Low, &[Google, Bing, Social],
         "Google truncates titles at roughly 600px (~60 characters); very short titles waste the most visible spot on the results page.");
     v.push(match &p.title {
         None => c.info("No title."),
@@ -491,13 +498,13 @@ fn meta(cx: &Ctx, v: &mut Vec<Check>) {
             let n = clen(t);
             if n < TITLE_MIN {
                 c.warn(
-                    format!("{n} characters — too short."),
+                    format!("{n} characters: too short."),
                     "Expand the title with the page's main topic and your brand.",
                 )
                 .code("html", title_snip.clone())
             } else if n > TITLE_MAX {
                 c.warn(
-                    format!("{n} characters — will likely be truncated."),
+                    format!("{n} characters: will likely be truncated."),
                     "Put the key words first and trim to about 60 characters.",
                 )
                 .code("html", title_snip.clone())
@@ -519,7 +526,7 @@ fn meta(cx: &Ctx, v: &mut Vec<Check>) {
     v.push(if p.title_count > 1 {
         c.warn(
             format!("{} <title> elements.", p.title_count),
-            "Remove the duplicates — often a CMS plus an SEO plugin both emit one.",
+            "Remove the duplicates: often a CMS plus an SEO plugin both emit one.",
         )
     } else {
         c.pass("One title element.")
@@ -531,7 +538,7 @@ fn meta(cx: &Ctx, v: &mut Vec<Check>) {
         None => c
             .fail(
                 "No meta description.",
-                "Write a unique 70–160 character summary that answers “what is this page and why read it?”.",
+                "Write a unique 70-160 character summary that answers “what is this page and why read it?”.",
             )
             .code("html", desc_snip.clone()),
         Some(d) if d.is_empty() => {
@@ -546,24 +553,24 @@ fn meta(cx: &Ctx, v: &mut Vec<Check>) {
     let c = new(
         "description-length",
         Cat::Meta,
-        "Description length (70–160 chars)",
+        "Description length (70-160 chars)",
         Sev::Medium,
         E::Low,
         &[Google, Bing, Social],
-        "Desktop snippets show ~155–160 characters; mobile is shorter, so lead with the important part.",
+        "Desktop snippets show ~155-160 characters; mobile is shorter, so lead with the important part.",
     );
     v.push(match &p.description {
         Some(d) if !d.is_empty() => {
             let n = clen(d);
             if n < DESC_MIN {
                 c.warn(
-                    format!("{n} characters — too short."),
+                    format!("{n} characters: too short."),
                     "Add specifics: who it's for, what they get, a differentiator.",
                 )
                 .code("html", desc_snip.clone())
             } else if n > DESC_MAX {
                 c.warn(
-                    format!("{n} characters — will be truncated."),
+                    format!("{n} characters: will be truncated."),
                     "Trim to ~155 characters with the key message in the first 110.",
                 )
                 .code("html", desc_snip.clone())
@@ -631,7 +638,7 @@ fn meta(cx: &Ctx, v: &mut Vec<Check>) {
         Sev::Low,
         E::Low,
         &[Google, Bing, Social, Perplexity],
-        "Google and Perplexity show your favicon next to results and citations — a missing one looks untrustworthy.",
+        "Google and Perplexity show your favicon next to results and citations: a missing one looks untrustworthy.",
     );
     v.push(if p.icons.is_empty() {
         c.warn("No <link rel=\"icon\"> found (browsers may still fall back to /favicon.ico).", "Declare a favicon at least 48×48px and an apple-touch-icon.")
@@ -706,7 +713,7 @@ fn social(cx: &Ctx, v: &mut Vec<Check>) {
     v.push(match p.og("og:image").or_else(|| p.tw("twitter:image")) {
         None => c.fail("No og:image or twitter:image.", "Create a 1200×630 share image and reference it with an absolute URL.")
             .code("html", format!("<meta property=\"og:image\" content=\"{}\">\n<meta property=\"og:image:width\" content=\"1200\">\n<meta property=\"og:image:height\" content=\"630\">\n<meta property=\"og:image:alt\" content=\"{}\">", esc(&img), esc(&s.title))),
-        Some(i) if !i.starts_with("http") => c.fail(format!("og:image is relative: `{i}`."), "Social crawlers don't resolve relative URLs — use an absolute https:// URL.")
+        Some(i) if !i.starts_with("http") => c.fail(format!("og:image is relative: `{i}`."), "Social crawlers don't resolve relative URLs: use an absolute https:// URL.")
             .code("html", format!(r#"<meta property="og:image" content="{}">"#, esc(&crate::extract::resolve(cx.url, i)))),
         Some(i) => {
             let mut miss = vec![];
@@ -719,7 +726,7 @@ fn social(cx: &Ctx, v: &mut Vec<Check>) {
             if miss.is_empty() {
                 c.pass(i.to_string())
             } else {
-                c.warn(format!("{i} — missing {}.", miss.join(", ")), "Declare dimensions so platforms render the card on first share, and alt text for accessibility.")
+                c.warn(format!("{i}: missing {}.", miss.join(", ")), "Declare dimensions so platforms render the card on first share, and alt text for accessibility.")
                     .code("html", format!("<meta property=\"og:image:width\" content=\"1200\">\n<meta property=\"og:image:height\" content=\"630\">\n<meta property=\"og:image:alt\" content=\"{}\">", esc(&s.title)))
             }
         }
@@ -813,7 +820,7 @@ fn content(cx: &Ctx, v: &mut Vec<Check>) {
     v.push(if !skips.is_empty() {
         c.warn(
             format!("Skipped levels: {}.", skips.join(", ")),
-            "Don't skip levels — style headings with CSS rather than picking tags for their size.",
+            "Don't skip levels: style headings with CSS rather than picking tags for their size.",
         )
     } else if h2 == 0 && p.word_count > 300 {
         c.warn(
@@ -827,7 +834,7 @@ fn content(cx: &Ctx, v: &mut Vec<Check>) {
     let c = new("server-rendered", Cat::Ai, "Content is in the HTML (no JS needed)", Sev::Critical, E::High, &[ChatGPT, Perplexity, Claude, Bing],
         "AI crawlers (GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot) don't run JavaScript. If content only appears after JS runs, they see an empty page. Google renders JS but with a delay.");
     v.push(if p.spa_shell {
-        c.fail(format!("Only {} words in the raw HTML and an empty app mount point — this looks like a client-side-rendered app.", p.word_count),
+        c.fail(format!("Only {} words in the raw HTML and an empty app mount point: this looks like a client-side-rendered app.", p.word_count),
             "Server-render or pre-render the page (Next.js SSR/SSG, Nuxt, Astro, prerender.io) so the main content is in the initial HTML.")
     } else {
         c.pass(format!("{} words present without JavaScript.", p.word_count))
@@ -839,7 +846,7 @@ fn content(cx: &Ctx, v: &mut Vec<Check>) {
         c.pass(format!("{} words.", p.word_count))
     } else if p.word_count >= 100 {
         c.warn(
-            format!("{} words — thin.", p.word_count),
+            format!("{} words: thin.", p.word_count),
             "Expand with specifics: definitions, steps, numbers, examples, FAQs.",
         )
     } else {
@@ -862,7 +869,7 @@ fn content(cx: &Ctx, v: &mut Vec<Check>) {
         Some(fp) => c.pass(crate::extract::truncate_chars(fp, 200)),
         None => c.warn(
             "No substantial <p> paragraph found.",
-            "Open with a 2–3 sentence paragraph that directly answers the page's main question.",
+            "Open with a 2-3 sentence paragraph that directly answers the page's main question.",
         ),
     });
 
@@ -958,7 +965,7 @@ fn content(cx: &Ctx, v: &mut Vec<Check>) {
     v.push(if p.question_headings > 0 {
         c.pass(format!("{}.", plural(p.question_headings, "question heading", "question headings")))
     } else {
-        c.warn("No headings phrased as questions.", "Add an FAQ section or rephrase key H2s as the questions your audience asks, with a 1–2 sentence answer right below.")
+        c.warn("No headings phrased as questions.", "Add an FAQ section or rephrase key H2s as the questions your audience asks, with a 1-2 sentence answer right below.")
     });
 }
 
@@ -1044,7 +1051,7 @@ fn structured(cx: &Ctx, v: &mut Vec<Check>) {
             c.pass("All blocks are valid JSON.")
         }
     } else {
-        c.fail(format!("Invalid JSON — {}.", invalid.join("; ")), "Fix the syntax (trailing commas, unescaped quotes and stray HTML are common causes). Test with validator.schema.org.")
+        c.fail(format!("Invalid JSON: {}.", invalid.join("; ")), "Fix the syntax (trailing commas, unescaped quotes and stray HTML are common causes). Test with validator.schema.org.")
     });
 
     let c = new("entity", Cat::Structured, "Organization / brand entity", Sev::Medium, E::Low, &[Google, ChatGPT, Perplexity, Claude, Gemini],
@@ -1070,7 +1077,7 @@ fn structured(cx: &Ctx, v: &mut Vec<Check>) {
             if miss.is_empty() {
                 c.pass(format!("{} with logo and sameAs.", o.get("name").and_then(Value::as_str).unwrap_or("Organization")))
             } else {
-                c.warn(format!("Organization is missing {}.", miss.join(", ")), "Complete the entity — sameAs (LinkedIn, X, Wikipedia, Crunchbase…) is the strongest disambiguation signal.").code("html", generated.clone())
+                c.warn(format!("Organization is missing {}.", miss.join(", ")), "Complete the entity: sameAs (LinkedIn, X, Wikipedia, Crunchbase…) is the strongest disambiguation signal.").code("html", generated.clone())
             }
         }
     });
@@ -1124,7 +1131,7 @@ fn structured(cx: &Ctx, v: &mut Vec<Check>) {
         if all_types.iter().any(|t| t == "BreadcrumbList") || p.microdata_types.iter().any(|t| t == "BreadcrumbList") {
             c.pass("BreadcrumbList present.")
         } else if is_home {
-            c.info("Homepage — breadcrumbs not needed.")
+            c.info("Homepage: breadcrumbs not needed.")
         } else {
             c.warn("No BreadcrumbList.", "Add BreadcrumbList markup matching your visible breadcrumb trail.")
                 .code("html", generated)
@@ -1140,10 +1147,10 @@ fn ai(cx: &Ctx, v: &mut Vec<Check>) {
     let c = new("llms-txt", Cat::Ai, "llms.txt", Sev::Medium, E::Low, &[ChatGPT, Perplexity, Claude],
         "/llms.txt is an emerging convention (llmstxt.org) giving AI agents a curated markdown map of your most important pages. It's cheap to add, but no engine has confirmed using it for ranking.");
     v.push(match cx.llms {
-        _ if cx.html_only => c.info("Pasted HTML — llms.txt not fetched."),
+        _ if cx.html_only => c.info("Pasted HTML: llms.txt not fetched."),
         None => c.info("llms.txt not fetched."),
         Some(l) if l.found && l.issues.is_empty() => c.pass(format!(
-            "{} — {} sections, {} links.",
+            "{}: {} sections, {} links.",
             l.title.clone().unwrap_or_default(),
             l.sections.len(),
             l.link_count
@@ -1158,7 +1165,7 @@ fn ai(cx: &Ctx, v: &mut Vec<Check>) {
             } else {
                 l.issues.join("; ")
             },
-            "Publish /llms.txt — a draft generated from this page is in Generated files.",
+            "Publish /llms.txt: a draft generated from this page is in Generated files.",
         ),
     });
 
@@ -1233,7 +1240,7 @@ fn ai(cx: &Ctx, v: &mut Vec<Check>) {
     } else if probed == 0 {
         c.info("No crawler probes (pasted HTML, or probes skipped).")
     } else if blocked.is_empty() {
-        c.pass(format!("{} crawler user agents received the page normally. (Probes use the UA string only — CDNs that verify bot IPs may still treat the real bots differently.)", probed))
+        c.pass(format!("{} crawler user agents received the page normally. (Probes use the UA string only: CDNs that verify bot IPs may still treat the real bots differently.)", probed))
     } else {
         let mut c = c.fail(
             format!("Blocked at the edge: {}.", blocked.iter().map(|a| format!("{} ({})", a.name, a.edge_status.unwrap_or(0))).collect::<Vec<_>>().join(", ")),
@@ -1288,7 +1295,7 @@ fn performance(cx: &Ctx, v: &mut Vec<Check>) {
     } else {
         c.fail(
             format!("{kb} KB ({} KB inline script).", p.scripts.inline_bytes / 1024),
-            "Reduce HTML weight — AI crawlers may never reach your content.",
+            "Reduce HTML weight: AI crawlers may never reach your content.",
         )
     });
 
@@ -1318,10 +1325,10 @@ fn performance(cx: &Ctx, v: &mut Vec<Check>) {
         Sev::Low,
         E::Low,
         &[Google, Bing],
-        "gzip/Brotli cut HTML transfer size by 70–90%.",
+        "gzip/Brotli cut HTML transfer size by 70-90%.",
     );
     v.push(if cx.html_only {
-        c.info("Pasted HTML — no headers.")
+        c.info("Pasted HTML: no headers.")
     } else {
         match h.get("content-encoding") {
             Some(e) if ["br", "gzip", "zstd", "deflate"].iter().any(|x| e.contains(x)) => c.pass(e.clone()),
@@ -1339,7 +1346,7 @@ fn performance(cx: &Ctx, v: &mut Vec<Check>) {
         "Cache-Control and validators (ETag/Last-Modified) let crawlers and CDNs revalidate cheaply.",
     );
     v.push(if cx.html_only {
-        c.info("Pasted HTML — no headers.")
+        c.info("Pasted HTML: no headers.")
     } else {
         match (h.get("cache-control"), h.get("etag").or(h.get("last-modified"))) {
             (Some(cc), Some(_)) => c.pass(format!("{cc} + validator")),
@@ -1382,7 +1389,7 @@ fn performance(cx: &Ctx, v: &mut Vec<Check>) {
         "loading=\"lazy\" on below-the-fold images speeds up the initial load.",
     );
     v.push(if p.image_count < 6 {
-        c.info(format!("{} — not needed.", plural(p.image_count, "image", "images")))
+        c.info(format!("{}: not needed.", plural(p.image_count, "image", "images")))
     } else if p.images_lazy > 0 {
         c.pass(format!("{} of {} images lazy-loaded.", p.images_lazy, p.image_count))
     } else {

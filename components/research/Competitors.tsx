@@ -30,7 +30,7 @@ function OrganicCompetitors() {
   const columns: Column<CompetitorRow>[] = [
     { key: "domain", label: "Domain", sort: (r) => r.domain, render: (r) => <a href={`https://${r.domain}`} target="_blank" rel="noreferrer">{r.domain}</a> },
     { key: "common", label: "Common keywords", align: "right", sort: (r) => r.commonKeywords, render: (r) => <b>{fmtNum(r.commonKeywords)}</b> },
-    { key: "avg", label: "Avg. position", align: "right", sort: (r) => r.avgPosition, render: (r) => r.avgPosition ?? "—" },
+    { key: "avg", label: "Avg. position", align: "right", sort: (r) => r.avgPosition, render: (r) => r.avgPosition ?? "-" },
     { key: "kw", label: "Their keywords", align: "right", sort: (r) => r.organic.keywords, render: (r) => fmtNum(r.organic.keywords) },
     { key: "top3", label: "Top 3", align: "right", sort: (r) => r.organic.pos1 + r.organic.pos2_3, render: (r) => fmtNum(r.organic.pos1 + r.organic.pos2_3) },
     { key: "traffic", label: "Est. traffic", align: "right", sort: (r) => r.organic.traffic, render: (r) => fmtNum(r.organic.traffic), title: "Estimated monthly organic visits" },
@@ -82,7 +82,7 @@ function OrganicCompetitors() {
                 </div>
                 <div className="stat">
                   <div className="v">{fmtNum(data.overview.pos4_10)}</div>
-                  <div className="l">Keywords at #4–10</div>
+                  <div className="l">Keywords at #4-10</div>
                 </div>
               </div>
             )}
@@ -113,7 +113,7 @@ const METRICS: { label: string; value: (r: Report) => string | number; score?: (
   { label: "AI crawlers blocked", value: (r) => r.crawlers.filter((c) => !c.allowed && c.purpose !== "training").length, better: "low" },
   { label: "llms.txt", value: (r) => (r.llms?.found ? "yes" : "no") },
   { label: "Sitemap URLs", value: (r) => (r.sitemap?.found ? r.sitemap.urlCount.toLocaleString() : "none") },
-  { label: "Time to first byte", value: (r) => (r.ttfbMs != null ? `${r.ttfbMs} ms` : "—") },
+  { label: "Time to first byte", value: (r) => (r.ttfbMs != null ? `${r.ttfbMs} ms` : "-") },
   { label: "HTML size", value: (r) => `${Math.round(r.page.htmlBytes / 1024)} KB` },
   { label: "Failed / warnings", value: (r) => `${r.summary.failed} / ${r.summary.warnings}` },
 ];
@@ -228,7 +228,7 @@ function AuditComparison() {
                           ))}
                         </div>
                       </div>
-                      <a className="btn btn-sm" href={`/?url=${encodeURIComponent(scans[0].url)}`}>
+                      <a className="btn btn-sm" href={`/audit?url=${encodeURIComponent(scans[0].url)}`}>
                         Open audit
                       </a>
                     </div>

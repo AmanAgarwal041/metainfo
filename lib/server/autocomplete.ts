@@ -1,5 +1,5 @@
 // Free keyword ideas from Google Autocomplete: what people actually type.
-// The seed is expanded with question words, modifiers and a–z so we see the
+// The seed is expanded with question words, modifiers and a-z so we see the
 // long tail. No volumes. Those need a data provider.
 
 import type { KeywordRow } from "@/lib/research-types";

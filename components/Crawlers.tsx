@@ -10,7 +10,7 @@ const PURPOSE: Record<CrawlerAccess["purpose"], string> = {
 };
 
 function Verdict({ ok, label }: { ok: boolean | null | undefined; label?: string }) {
-  if (ok == null) return <span className="na">—</span>;
+  if (ok == null) return <span className="na">-</span>;
   return <span className={ok ? "yes" : "no"}>{label ?? (ok ? "Allowed" : "Blocked")}</span>;
 }
 
@@ -77,7 +77,7 @@ export default function Crawlers({ report }: { report: Report }) {
                     ) : c.edgeError ? (
                       <span className="muted small">{c.edgeError}</span>
                     ) : (
-                      <span className="na" title="Training crawlers aren't probed">—</span>
+                      <span className="na" title="Training crawlers aren't probed">-</span>
                     )}
                   </td>
                   <td>
@@ -155,7 +155,7 @@ export default function Crawlers({ report }: { report: Report }) {
                   {sitemap?.sources.map((s) => (
                     <tr key={s.url}>
                       <td className="break small">{s.url}</td>
-                      <td className="small">{s.status ?? "—"}</td>
+                      <td className="small">{s.status ?? "-"}</td>
                       <td className="small">{s.kind}</td>
                       <td className="small">{s.urlCount || ""}</td>
                     </tr>

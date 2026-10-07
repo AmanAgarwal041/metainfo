@@ -4,9 +4,8 @@ import { useState } from "react";
 import { PLATFORM_META, type Platform, type Severity, type Status } from "@/lib/types";
 
 export function scoreColor(score: number): string {
-  if (score >= 90) return "var(--pass)";
-  if (score >= 70) return "#65a30d";
-  if (score >= 50) return "var(--warn)";
+  if (score >= 80) return "var(--pass)";
+  if (score >= 55) return "var(--warn)";
   return "var(--fail)";
 }
 
@@ -114,7 +113,7 @@ export function hostOf(url: string): string {
 }
 
 export function Sparkline({ values, width = 120, height = 28 }: { values: number[]; width?: number; height?: number }) {
-  if (values.length < 2) return <span className="muted small spark">—</span>;
+  if (values.length < 2) return <span className="muted small spark">-</span>;
   const pts = values.map((v, i) => `${(i / (values.length - 1)) * width},${height - 2 - (v / 100) * (height - 4)}`);
   const last = values[values.length - 1];
   return (

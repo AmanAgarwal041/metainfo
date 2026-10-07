@@ -114,11 +114,13 @@ export default function Issues({
       {grouped.map((g) => (
         <section key={g.cat.category} style={{ marginBottom: 20 }}>
           <h3 className="section-title" style={{ marginBottom: 8 }}>
-            {g.cat.label} <span className="muted small">· score {g.cat.score}</span>
+            {g.cat.label} <span className="muted small">score {g.cat.score}</span>
           </h3>
-          {g.items.map((c) => (
-            <CheckCard key={c.id} check={c} />
-          ))}
+          <div className="check-list">
+            {g.items.map((c) => (
+              <CheckCard key={c.id} check={c} />
+            ))}
+          </div>
         </section>
       ))}
     </div>

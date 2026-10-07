@@ -12,7 +12,7 @@ const MAX_JSONLD_RAW: usize = 20_000;
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MetaEntry {
-    /// `name`, `property`, `http-equiv`, `itemprop` or `charset` — whichever identifies the tag.
+    /// `name`, `property`, `http-equiv`, `itemprop` or `charset`: whichever identifies the tag.
     pub key: String,
     pub attr: &'static str,
     pub content: String,
@@ -285,7 +285,7 @@ fn keyword_body(doc: &Html) -> Option<String> {
         .map(block_text_of)
 }
 
-/// How often each term (1–3 words) appears in a page's main text.
+/// How often each term (1-3 words) appears in a page's main text.
 pub fn term_counts(html: &str, terms: &[String]) -> Vec<usize> {
     let doc = Html::parse_document(html);
     let body = keyword_body(&doc).unwrap_or_default();

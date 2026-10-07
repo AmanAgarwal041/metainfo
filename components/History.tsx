@@ -1,85 +1,21 @@
 "use client";
 
-import { useState } from "react";
 import { diffSnapshots, type TrackedSite } from "@/lib/history";
-import { PLATFORM_META, PLATFORMS, type Platform, type Report } from "@/lib/types";
+import { PLATFORM_META, PLATFORMS, type Report } from "@/lib/types";
+import { LineChart } from "./charts";
 import { download, scoreColor } from "./ui";
 
-type Series = Platform | "overall";
-
-function TrendChart({ site, visible }: { site: TrackedSite; visible: Set<Series> }) {
-  const snaps = site.snapshots;
-  const W = 760;
-  const H = 240;
-  const pad = { l: 34, r: 12, t: 12, b: 26 };
-  const iw = W - pad.l - pad.r;
-  const ih = H - pad.t - pad.b;
-  const x = (i: number) => pad.l + (snaps.length === 1 ? iw / 2 : (i / (snaps.length - 1)) * iw);
-  const y = (v: number) => pad.t + ih - (v / 100) * ih;
-  const series: { id: Series; color: string; values: number[] }[] = [
-    { id: "overall", color: "var(--text)", values: snaps.map((s) => s.overall) },
-    ...PLATFORMS.map((p) => ({ id: p as Series, color: PLATFORM_META[p].color, values: snaps.map((s) => s.scores[p] ?? 0) })),
-  ];
-  const sameDay = snaps.length > 0 && new Date(snaps[0].scannedAt).toDateString() === new Date(snaps[snaps.length - 1].scannedAt).toDateString();
-  const fmt = (iso: string) =>
-    sameDay
-      ? new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
-      : new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  const ticks = snaps.length <= 6 ? snaps.map((_, i) => i) : [0, Math.floor((snaps.length - 1) / 2), snaps.length - 1];
-  return (
-    <div className="table-wrap">
-      <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label="Score trend">
-        {[0, 25, 50, 75, 100].map((v) => (
-          <g key={v}>
-            <line className="gridline" x1={pad.l} x2={W - pad.r} y1={y(v)} y2={y(v)} />
-            <text x={pad.l - 6} y={y(v) + 4} textAnchor="end">
-              {v}
-            </text>
-          </g>
-        ))}
-        {ticks.map((i) => (
-          <text key={i} x={x(i)} y={H - 6} textAnchor="middle">
-            {fmt(snaps[i].scannedAt)}
-          </text>
-        ))}
-        {series
-          .filter((s) => visible.has(s.id))
-          .map((s) => (
-            <g key={s.id}>
-              <polyline
-                points={s.values.map((v, i) => `${x(i)},${y(v)}`).join(" ")}
-                fill="none"
-                stroke={s.color}
-                strokeWidth={s.id === "overall" ? 3 : 2}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-              />
-              {s.values.map((v, i) => (
-                <circle key={i} cx={x(i)} cy={y(v)} r={s.id === "overall" ? 3.5 : 2.5} fill={s.color}>
-                  <title>
-                    {s.id === "overall" ? "Overall" : PLATFORM_META[s.id].short}: {v} ({new Date(snaps[i].scannedAt).toLocaleString()})
-                  </title>
-                </circle>
-              ))}
-            </g>
-          ))}
-      </svg>
-    </div>
-  );
+function fmtTick(iso: string, all: { scannedAt: string }[]) {
+  const sameDay = all.length > 0 && new Date(all[0].scannedAt).toDateString() === new Date(all[all.length - 1].scannedAt).toDateString();
+  const d = new Date(iso);
+  return sameDay ? d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 export default function History({ report, site }: { report: Report; site: TrackedSite | null }) {
-  const [visible, setVisible] = useState<Set<Series>>(new Set(["overall", "google", "chatgpt", "perplexity", "claude"]));
   if (!site) {
     return <div className="card empty">Tracking needs a scanned URL. Scan a live page to start recording its history.</div>;
   }
   const title = (id: string) => report.checks.find((c) => c.id === id)?.title ?? id;
-  const toggle = (s: Series) => {
-    const next = new Set(visible);
-    if (next.has(s)) next.delete(s);
-    else next.add(s);
-    setVisible(next);
-  };
   const rows = [...site.snapshots].reverse();
 
   return (
@@ -93,15 +29,18 @@ export default function History({ report, site }: { report: Report; site: Tracke
             Export history
           </button>
         </div>
-        <div className="legend" style={{ margin: "10px 0" }}>
-          {(["overall", ...PLATFORMS] as Series[]).map((s) => (
-            <button key={s} aria-pressed={visible.has(s)} onClick={() => toggle(s)}>
-              <span className="dot" style={{ background: s === "overall" ? "var(--text)" : PLATFORM_META[s].color }} />
-              {s === "overall" ? "Overall" : PLATFORM_META[s].short}
-            </button>
-          ))}
+        <div style={{ marginTop: 10 }}>
+          <LineChart
+            ariaLabel="Audit scores over time"
+            x={site.snapshots.map((s) => fmtTick(s.scannedAt, site.snapshots))}
+            yDomain={[0, 100]}
+            series={[
+              { id: "overall", label: "Overall", color: "var(--text)", values: site.snapshots.map((s) => s.overall) },
+              ...PLATFORMS.map((p) => ({ id: p, label: PLATFORM_META[p].short, color: PLATFORM_META[p].color, values: site.snapshots.map((s) => s.scores[p] ?? null) })),
+            ]}
+            initiallyHidden={["bing", "gemini", "social"]}
+          />
         </div>
-        <TrendChart site={site} visible={visible} />
         {site.snapshots.length === 1 && <p className="muted small">Rescan after shipping fixes to see the trend.</p>}
       </div>
 
@@ -139,7 +78,7 @@ export default function History({ report, site }: { report: Report; site: Tracke
                     </td>
                     {PLATFORMS.map((p) => (
                       <td key={p} className="c" style={{ color: scoreColor(s.scores[p] ?? 0) }}>
-                        {s.scores[p] ?? "—"}
+                        {s.scores[p] ?? "-"}
                       </td>
                     ))}
                     <td className="small">
