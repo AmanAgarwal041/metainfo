@@ -39,3 +39,5 @@ yarn-error.log*
 #wasm
 /wasm/target
 /pkg
+/wasm/pkg
+/public/engine
