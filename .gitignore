@@ -41,3 +41,4 @@ yarn-error.log*
 /pkg
 /wasm/pkg
 /public/engine
+.env
