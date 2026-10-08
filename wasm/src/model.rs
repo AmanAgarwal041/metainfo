@@ -42,6 +42,8 @@ pub struct Resource {
     pub content_type: Option<String>,
     pub body: Option<String>,
     pub error: Option<String>,
+    /// The fetcher capped the download, so `body` is only the start of the file.
+    pub truncated: bool,
 }
 
 impl Resource {

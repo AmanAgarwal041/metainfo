@@ -28,6 +28,8 @@ pub struct SitemapReport {
     pub child_sitemaps: Vec<String>,
     /// None when we couldn't see every child sitemap.
     pub contains_page: Option<bool>,
+    /// A sitemap was larger than the download cap, so counts are lower bounds.
+    pub partial: bool,
     pub sample_urls: Vec<String>,
     pub issues: Vec<String>,
 }
@@ -88,6 +90,9 @@ pub fn analyze(resources: &[Resource], page_url: &str, robots_sitemaps: &[String
             r.sources.push(src);
             continue;
         };
+        if res.truncated {
+            r.partial = true;
+        }
         let head = body.trim_start();
         if head.starts_with("<!DOCTYPE html") || head.starts_with("<html") || head.starts_with("<!doctype html") {
             src.kind = "invalid";
@@ -147,7 +152,7 @@ pub fn analyze(resources: &[Resource], page_url: &str, robots_sitemaps: &[String
     }
     r.contains_page = if saw_page {
         Some(true)
-    } else if !r.found || unfetched_children {
+    } else if !r.found || unfetched_children || r.partial {
         None
     } else {
         Some(false)
@@ -173,6 +178,18 @@ mod tests {
         assert_eq!(r.url_count, 2);
         assert_eq!(r.contains_page, Some(true));
         assert_eq!(r.latest_lastmod.as_deref(), Some("2025-02-01"));
+    }
+
+    #[test]
+    fn truncated_sitemap_is_partial_and_inconclusive() {
+        let xml = r#"<urlset><url><loc>https://ex.com/a</loc></url><url><loc>https://ex.com/b</loc>"#;
+        let mut res = res("https://ex.com/sitemap.xml", xml);
+        res.truncated = true;
+        let r = analyze(&[res], "https://ex.com/zzz", &[]);
+        assert!(r.found && r.partial);
+        assert_eq!(r.url_count, 2);
+        // Not in the part we read doesn't mean it's not in the sitemap.
+        assert_eq!(r.contains_page, None);
     }
 
     #[test]

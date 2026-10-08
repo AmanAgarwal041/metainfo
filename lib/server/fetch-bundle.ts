@@ -23,7 +23,9 @@ const BOT_UAS: Record<string, string> = {
 
 const PAGE_MAX_BYTES = 5 * 1024 * 1024;
 const TEXT_MAX_BYTES = 512 * 1024;
-const SITEMAP_MAX_BYTES = 12 * 1024 * 1024;
+// Enough for thousands of URLs. Whole sitemaps can be tens of MB (stripe.com: 22 MB), which made scan
+// responses huge and exceeded the CPU limit on Cloudflare Workers; the engine treats capped ones as partial.
+const SITEMAP_MAX_BYTES = 1024 * 1024;
 const TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 10;
 
@@ -169,9 +171,31 @@ async function fetchFollow(
   throw new ScanError(`More than ${MAX_REDIRECTS} redirects.`, 502);
 }
 
-async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip"));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+/** Gunzip, keeping whatever decompresses before an error (capped downloads cut gzip streams short). */
+async function gunzip(bytes: Uint8Array, maxOut = SITEMAP_MAX_BYTES * 4): Promise<Uint8Array> {
+  const reader = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip")).getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (total < maxOut) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } catch {
+    /* truncated input: use what decompressed */
+  }
+  await reader.cancel().catch(() => {});
+  const out = new Uint8Array(Math.min(total, maxOut));
+  let off = 0;
+  for (const c of chunks) {
+    const take = Math.min(c.byteLength, out.length - off);
+    out.set(c.subarray(0, take), off);
+    off += take;
+    if (off >= out.length) break;
+  }
+  return out;
 }
 
 async function decode(bytes: Uint8Array, contentType?: string): Promise<string> {
@@ -198,6 +222,7 @@ async function fetchResource(url: URL, maxBytes: number, accept = "text/plain,*/
       status: r.status,
       contentType: r.headers["content-type"] ?? null,
       body: r.bytes ? await decode(r.bytes, r.headers["content-type"]) : null,
+      truncated: !!r.bytes && r.bytes.byteLength >= maxBytes,
     };
   } catch (e) {
     return { url: url.toString(), status: null, error: errMessage(e) };
@@ -240,7 +265,7 @@ async function fetchSitemaps(origin: string, robotsBody: string | null, pagePath
     .filter((r) => r.body?.includes("<sitemapindex"))
     .flatMap((r) => sitemapLocs(r.body!))
     .sort((a, b) => Number(firstSeg && b.toLowerCase().includes(firstSeg)) - Number(firstSeg && a.toLowerCase().includes(firstSeg)))
-    .slice(0, 4);
+    .slice(0, 2);
   const childRes = await Promise.all(
     children.map((u) => fetchResource(new URL(u), SITEMAP_MAX_BYTES, "application/xml,text/xml,*/*;q=0.8")),
   );

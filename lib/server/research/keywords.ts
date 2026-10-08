@@ -6,9 +6,10 @@ import type { KeywordMetrics, KeywordResearch, KeywordRow, Location } from "@/li
 export async function keywordResearch(q: string, location: Location): Promise<KeywordResearch> {
   const seed = q.toLowerCase().slice(0, 80);
   const warnings: string[] = [];
-  const auto = await autocompleteIdeas(seed, location.gl, location.lang).catch(() => ({ keywords: [] as string[], failed: -1 }));
+  const auto = await autocompleteIdeas(seed, location.gl, location.lang).catch(() => ({ keywords: [] as string[], failed: -1, error: undefined as string | undefined, sources: [] as string[] }));
   if (auto.failed === -1) warnings.push("Google Autocomplete didn't respond. Only provider keywords are shown.");
-  else if (auto.failed > 0) warnings.push(`${auto.failed} autocomplete lookups failed (rate limited?). Results may be incomplete.`);
+  else if (auto.failed > 0) warnings.push(`${auto.failed} autocomplete lookups failed (${auto.error ?? "unknown error"}). Results may be incomplete.`);
+  if (auto.sources.length && !auto.sources.includes("Google")) warnings.push(`Google Autocomplete blocks this server, so ideas come from ${auto.sources.join(" and ")} autocomplete.`);
 
   const rows = new Map<string, KeywordRow>();
   const put = (m: KeywordMetrics, source: KeywordRow["source"]) => {

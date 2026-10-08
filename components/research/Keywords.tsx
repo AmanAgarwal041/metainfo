@@ -249,7 +249,7 @@ export default function Keywords() {
               </div>
               <div className="row" style={{ marginBottom: 8 }}>
                 <span className="muted small">
-                  {rows.length} keywords · source: {hasMetrics ? "DataForSEO + Google Autocomplete" : "Google Autocomplete (free)"}
+                  {rows.length} keywords · source: {hasMetrics ? "DataForSEO + search autocomplete" : "search autocomplete (free)"}
                 </span>
                 <span className="spacer" />
                 {hasMetrics && <CostNote cost={data.cost} cached={data.cached} />}

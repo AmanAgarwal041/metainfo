@@ -325,7 +325,7 @@ fn indexability(cx: &Ctx, v: &mut Vec<Check>) {
         Some(s) if !s.found => c.fail("No valid XML sitemap at the robots.txt location or /sitemap.xml.", "Publish a sitemap listing your canonical URLs with <lastmod>, then submit it in Google Search Console and Bing Webmaster Tools.")
             .code("xml", format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n  <url>\n    <loc>{}</loc>\n    <lastmod>YYYY-MM-DD</lastmod>\n  </url>\n</urlset>", cx.sugg.canonical.clone().unwrap_or_default())),
         Some(s) if !s.issues.is_empty() => c.warn(format!("Found ({} URLs) with issues: {}", s.url_count, s.issues.join("; ")), "Fix the listed sitemap issues."),
-        Some(s) => c.pass(format!("Found: {}, {}{}.", plural(s.url_count, "URL", "URLs"), plural(s.child_sitemaps.len(), "child sitemap", "child sitemaps"), s.latest_lastmod.as_ref().map(|l| format!(", latest lastmod {l}")).unwrap_or_default())),
+        Some(s) => c.pass(format!("Found: {}{}, {}{}.", plural(s.url_count, "URL", "URLs"), if s.partial { " in the first 1 MB of each file (it's larger)" } else { "" }, plural(s.child_sitemaps.len(), "child sitemap", "child sitemaps"), s.latest_lastmod.as_ref().map(|l| format!(", latest lastmod {l}")).unwrap_or_default())),
     });
 
     let c = new(
@@ -362,7 +362,9 @@ fn indexability(cx: &Ctx, v: &mut Vec<Check>) {
                 "This URL is not in the sitemap.",
                 "Add this page's canonical URL to your sitemap (unless it shouldn't be indexed).",
             ),
-            None => c.info("Sitemap index has more child sitemaps than we fetched: couldn't confirm."),
+            None => c.info(
+                "Couldn't confirm: the sitemap is larger than the part we read, or has child sitemaps we didn't fetch.",
+            ),
         },
         _ => c.info("No sitemap to check."),
     });

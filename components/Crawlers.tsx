@@ -137,7 +137,7 @@ export default function Crawlers({ report }: { report: Report }) {
             {sitemap?.found ? (
               <div className="small">
                 <p>
-                  <b>{sitemap.urlCount.toLocaleString()}</b> URLs in fetched files · {sitemap.lastmodCount.toLocaleString()} with lastmod
+                  <b>{sitemap.urlCount.toLocaleString()}</b> URLs in fetched files{sitemap.partial ? " (first 1 MB of each file)" : ""} · {sitemap.lastmodCount.toLocaleString()} with lastmod
                   {sitemap.latestLastmod && <> · latest {sitemap.latestLastmod}</>}
                 </p>
                 <p>

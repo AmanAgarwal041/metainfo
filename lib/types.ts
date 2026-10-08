@@ -12,6 +12,8 @@ export interface Resource {
   contentType?: string | null;
   body?: string | null;
   error?: string | null;
+  /** The download was capped, so the body is only the start of the file. */
+  truncated?: boolean;
 }
 
 export interface ScanInput {
@@ -183,6 +185,8 @@ export interface SitemapReport {
   latestLastmod?: string | null;
   childSitemaps: string[];
   containsPage?: boolean | null;
+  /** At least one sitemap was larger than the download cap, so counts are lower bounds. */
+  partial: boolean;
   sampleUrls: string[];
   issues: string[];
 }
