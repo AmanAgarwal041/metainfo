@@ -42,3 +42,8 @@ yarn-error.log*
 /wasm/pkg
 /public/engine
 .env
+
+# cloudflare
+/.open-next
+/.wrangler
+.dev.vars

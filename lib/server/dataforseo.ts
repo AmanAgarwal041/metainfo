@@ -11,6 +11,7 @@ import type {
   OrganicMetrics,
   ReferringDomain,
 } from "@/lib/research-types";
+import { currentCredentials } from "./credentials";
 
 // DATAFORSEO_API_URL can point at the sandbox (https://sandbox.dataforseo.com/v3/) for free testing.
 const BASE = process.env.DATAFORSEO_API_URL ?? "https://api.dataforseo.com/v3/";
@@ -23,8 +24,20 @@ export class ProviderError extends Error {
   }
 }
 
+/** True when this request has DataForSEO credentials (its own, or the server's). */
 export function dataForSeoConfigured(): boolean {
-  return Boolean(process.env.DATAFORSEO_LOGIN && process.env.DATAFORSEO_PASSWORD);
+  return currentCredentials() !== null;
+}
+
+function authHeader(): string {
+  const c = currentCredentials();
+  if (!c) throw new ProviderError("DataForSEO isn't configured.", 501);
+  return `Basic ${Buffer.from(`${c.login}:${c.password}`).toString("base64")}`;
+}
+
+/** Cache entries are per account, so one user's paid results never reach another. */
+function accountKey(): string {
+  return currentCredentials()?.login.toLowerCase() ?? "";
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,7 +46,8 @@ type Json = any;
 const cache = new Map<string, { at: number; result: Json; cost: number }>();
 
 const FRIENDLY: Record<number, string> = {
-  40100: "DataForSEO rejected the credentials. Check DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD (use the API password from app.dataforseo.com/api-access).",
+  40100: "DataForSEO rejected the credentials. Use the API login and API password from app.dataforseo.com/api-access (not your account password).",
+  40104: "Your DataForSEO account isn't verified yet. Complete verification at app.dataforseo.com, then try again.",
   40200: "DataForSEO says payment is required. Top up your balance at app.dataforseo.com.",
   40210: "Your DataForSEO balance is too low for this request. Top up at app.dataforseo.com.",
   40202: "DataForSEO rate limit reached (2000 requests/min). Try again in a minute.",
@@ -50,16 +64,15 @@ export interface CallResult {
 /** POST one task to a live endpoint and return `tasks[0].result[0]`. */
 export async function call(path: string, task: Record<string, unknown>): Promise<CallResult> {
   if (!dataForSeoConfigured()) throw new ProviderError("DataForSEO isn't configured.", 501);
-  const key = `${path}|${JSON.stringify(task)}`;
+  const key = `${accountKey()}|${path}|${JSON.stringify(task)}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return { result: hit.result, cost: 0, cached: true };
 
-  const auth = Buffer.from(`${process.env.DATAFORSEO_LOGIN}:${process.env.DATAFORSEO_PASSWORD}`).toString("base64");
   let res: Response;
   try {
     res = await fetch(BASE + path, {
       method: "POST",
-      headers: { authorization: `Basic ${auth}`, "content-type": "application/json" },
+      headers: { authorization: authHeader(), "content-type": "application/json" },
       body: JSON.stringify([task]),
       signal: AbortSignal.timeout(60_000),
     });
@@ -90,11 +103,10 @@ export async function call(path: string, task: Record<string, unknown>): Promise
 /** GET a free catalog endpoint (e.g. model lists), cached for a day. */
 export async function getCatalog(path: string): Promise<Json> {
   if (!dataForSeoConfigured()) throw new ProviderError("DataForSEO isn't configured.", 501);
-  const key = `GET|${path}`;
+  const key = `${accountKey()}|GET|${path}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < 24 * 60 * 60 * 1000) return hit.result;
-  const auth = Buffer.from(`${process.env.DATAFORSEO_LOGIN}:${process.env.DATAFORSEO_PASSWORD}`).toString("base64");
-  const res = await fetch(BASE + path, { headers: { authorization: `Basic ${auth}` }, signal: AbortSignal.timeout(30_000) });
+  const res = await fetch(BASE + path, { headers: { authorization: authHeader() }, signal: AbortSignal.timeout(30_000) });
   const body: Json = await res.json().catch(() => null);
   if (!body || body.status_code !== 20000) {
     throw new ProviderError(FRIENDLY[body?.status_code ?? 0] ?? `DataForSEO error ${body?.status_code}: ${body?.status_message ?? res.status}`, 502, body?.status_code);
@@ -102,6 +114,19 @@ export async function getCatalog(path: string): Promise<Json> {
   const result = body.tasks?.[0]?.result ?? null;
   cache.set(key, { at: Date.now(), result, cost: 0 });
   return result;
+}
+
+/** The account behind the current credentials: login and remaining balance (free endpoint, not cached). */
+export async function accountInfo(): Promise<{ login: string; balance: number | null; currency: string }> {
+  if (!dataForSeoConfigured()) throw new ProviderError("DataForSEO isn't configured.", 501);
+  const res = await fetch(BASE + "appendix/user_data", { headers: { authorization: authHeader() }, signal: AbortSignal.timeout(20_000) });
+  const body: Json = await res.json().catch(() => null);
+  if (!body || body.status_code !== 20000) {
+    const code = body?.status_code;
+    throw new ProviderError(FRIENDLY[code ?? 0] ?? `DataForSEO error ${code ?? res.status}`, code === 40100 ? 401 : 502, code);
+  }
+  const r = body.tasks?.[0]?.result?.[0] ?? {};
+  return { login: String(r.login ?? currentCredentials()?.login ?? ""), balance: typeof r.money?.balance === "number" ? r.money.balance : null, currency: "USD" };
 }
 
 // ---------------------------------------------------------------- normalisers

@@ -2,9 +2,6 @@
 // redirects by hand so the chain is recorded), robots.txt, llms.txt, sitemaps,
 // and the page again with each crawler's user agent to detect CDN/WAF blocks.
 
-import dns from "node:dns/promises";
-import net from "node:net";
-import { gunzipSync } from "node:zlib";
 import type { Resource, ScanInput } from "@/lib/types";
 
 const BROWSER_UA =
@@ -38,8 +35,15 @@ export class ScanError extends Error {
 
 // ---------------------------------------------------------------- SSRF guard
 
+/** 4 for an IPv4 literal, 6 for IPv6, 0 otherwise (node:net.isIP without the import). */
+function ipVersion(s: string): 0 | 4 | 6 {
+  if (/^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(s)) return 4;
+  if (s.includes(":") && /^[0-9a-f:.]+$/i.test(s)) return 6;
+  return 0;
+}
+
 function isPrivateIp(ip: string): boolean {
-  if (net.isIPv4(ip)) {
+  if (ipVersion(ip) === 4) {
     const [a, b] = ip.split(".").map(Number);
     return (
       a === 0 || a === 10 || a === 127 || a >= 224 ||
@@ -55,15 +59,25 @@ function isPrivateIp(ip: string): boolean {
   return l === "::" || l === "::1" || l.startsWith("fc") || l.startsWith("fd") || l.startsWith("fe80");
 }
 
+/** True when running on Cloudflare Workers (workerd). */
+const onWorkers = typeof navigator !== "undefined" && navigator.userAgent === "Cloudflare-Workers";
+
 async function assertPublic(url: URL) {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new ScanError(`Only http(s) URLs can be scanned (got ${url.protocol}).`);
   }
   if (process.env.ALLOW_PRIVATE_HOSTS === "1") return;
   const host = url.hostname.replace(/^\[|\]$/g, "");
-  const addrs = net.isIP(host) ? [{ address: host }] : await dns.lookup(host, { all: true }).catch(() => {
-    throw new ScanError(`Could not resolve ${host}.`);
-  });
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal")) {
+    throw new ScanError("That host resolves to a private network address and can't be scanned.");
+  }
+  // Workers can't reach private networks (global_fetch_strictly_public), so only literal IPs need checking there.
+  if (onWorkers && !ipVersion(host)) return;
+  const addrs = ipVersion(host)
+    ? [{ address: host }]
+    : await (await import("node:dns/promises")).default.lookup(host, { all: true }).catch(() => {
+        throw new ScanError(`Could not resolve ${host}.`);
+      });
   if (addrs.some((a) => isPrivateIp(a.address))) {
     throw new ScanError("That host resolves to a private network address and can't be scanned.");
   }
@@ -155,10 +169,15 @@ async function fetchFollow(
   throw new ScanError(`More than ${MAX_REDIRECTS} redirects.`, 502);
 }
 
-function decode(bytes: Uint8Array, contentType?: string): string {
+async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function decode(bytes: Uint8Array, contentType?: string): Promise<string> {
   if (bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
     try {
-      bytes = gunzipSync(bytes);
+      bytes = await gunzip(bytes);
     } catch {
       /* fall through with raw bytes */
     }
@@ -178,7 +197,7 @@ async function fetchResource(url: URL, maxBytes: number, accept = "text/plain,*/
       url: url.toString(),
       status: r.status,
       contentType: r.headers["content-type"] ?? null,
-      body: r.bytes ? decode(r.bytes, r.headers["content-type"]) : null,
+      body: r.bytes ? await decode(r.bytes, r.headers["content-type"]) : null,
     };
   } catch (e) {
     return { url: url.toString(), status: null, error: errMessage(e) };
@@ -268,7 +287,7 @@ export async function buildBundle(rawUrl: string): Promise<ScanInput> {
     finalUrl: page.url,
     status: page.status,
     headers: page.headers,
-    html: page.bytes ? decode(page.bytes, contentType) : "",
+    html: page.bytes ? await decode(page.bytes, contentType) : "",
     redirects: page.redirects,
     ttfbMs: page.ttfbMs,
     robots,

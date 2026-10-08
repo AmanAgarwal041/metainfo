@@ -31,9 +31,23 @@ Shared across pages: your site, up to 5 competitors and a target market (15 coun
 
 ### Connecting DataForSEO
 
-DataForSEO is pay-as-you-go with no subscription. Roughly: a keyword search makes 3 Labs calls (about $0.05 total), a keyword gap 2 calls per competitor, a live SERP
-about $0.004, and backlinks about $0.025 per request. The Backlinks API may need enabling at app.dataforseo.com first. Copy
-`.env.example` to `.env.local` and set:
+DataForSEO is pay-as-you-go with no subscription. Roughly: a keyword search makes 3 Labs calls (about $0.05 total), a keyword
+gap 2 calls per competitor, a live SERP about $0.004, and backlinks about $0.025 per request. The Backlinks API may need enabling
+at app.dataforseo.com first, and new accounts must be verified there before the API answers.
+
+There are two ways to provide keys, and they can be combined:
+
+**1. Bring your own keys (any user).** In **Settings → Data source**, enter a DataForSEO API login and API password. They're
+saved in that browser only and sent with each research request in the `x-dataforseo-login` / `x-dataforseo-password` headers.
+The server uses them for that request only and never stores or logs them. **Test keys** shows the account's balance. API and MCP
+callers pass the same headers:
+
+```bash
+curl -H "x-dataforseo-login: you@example.com" -H "x-dataforseo-password: $DFS_API_PASSWORD" \
+  "https://your-host/api/research/serp?q=invoice+software"
+```
+
+**2. Server keys (the owner pays).** Set them as environment variables (`.env.local` locally, `wrangler secret put` on Cloudflare):
 
 ```bash
 DATAFORSEO_LOGIN=you@example.com
@@ -41,8 +55,11 @@ DATAFORSEO_PASSWORD=your-api-password     # app.dataforseo.com/api-access
 RESEARCH_TOKEN=some-secret                # strongly recommended when deployed
 ```
 
-* Responses are cached in memory for 12 hours, so repeating a lookup is free. Each result shows what it cost.
-* With `RESEARCH_TOKEN` set, `/api/research/*` requires it (the UI asks for it once), so a public deployment can't spend your balance.
+* A request's own keys always take precedence over the server's.
+* With `RESEARCH_TOKEN` set, using the **server's** keys requires the token (the UI asks for it once), so a public deployment
+  can't spend your balance. Requests that bring their own keys don't need it.
+* Responses are cached in memory for 12 hours, **per DataForSEO account**, so repeating a lookup is free and one user's paid
+  results are never served to another. Each result shows what it cost.
 * `DATAFORSEO_API_URL=https://sandbox.dataforseo.com/v3/` uses DataForSEO's free sandbox (dummy data) for testing.
 
 ## Workspace
@@ -116,6 +133,30 @@ npm test             # Rust unit tests
 npm run lint         # eslint + clippy
 npm run build        # engine + production Next.js build
 ```
+
+## Deploy to Cloudflare Workers
+
+The app deploys to Cloudflare Workers with [OpenNext](https://opennext.js.org/cloudflare) (`@opennextjs/cloudflare`).
+Everything runs on Workers, including the server-side Rust/WASM engine used by `/api/report` and the MCP `audit_page` tool.
+
+```bash
+npx wrangler login                 # once
+npm run build:wasm                 # the engine (needs Rust + wasm-pack locally)
+npm run preview                    # build and run the Worker locally in workerd (http://localhost:8787)
+npm run deploy                     # build and deploy
+
+# optional server keys (otherwise users bring their own in Settings)
+npx wrangler secret put DATAFORSEO_LOGIN
+npx wrangler secret put DATAFORSEO_PASSWORD
+npx wrangler secret put RESEARCH_TOKEN
+```
+
+* Config lives in `wrangler.jsonc` (Worker name `metainfo`) and `open-next.config.ts`.
+* `global_fetch_strictly_public` keeps the scanner on the public internet, which is the SSRF guard on Workers.
+* OpenNext copies local `.env*` values into the Worker bundle; `scripts/cf-sanitize-env.mjs` (part of `npm run cf:build`) strips
+  everything except `NEXT_PUBLIC_*`, so credentials from a local `.env` never ship. Use `wrangler secret put` for production keys.
+* The Worker is about 1.8 MB gzipped, under the 3 MB Workers Free limit.
+* Browser history (projects, audits, rank checks, AI runs) is still per browser, as with the Node deployment.
 
 ## API (CI / scheduled tracking)
 

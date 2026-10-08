@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { timingSafeEqual } from "node:crypto";
 import { locationByCode, type Location } from "@/lib/research-types";
+import { tokenSatisfied, withCredentials } from "./credentials";
 import { dataForSeoConfigured, ProviderError } from "./dataforseo";
 
 export class BadRequest extends Error {}
@@ -11,17 +11,12 @@ export class BadRequest extends Error {}
  */
 export function researchRoute(fn: (req: NextRequest, ctx: { location: Location }) => Promise<unknown>) {
   return async (req: NextRequest) => {
-    const required = process.env.RESEARCH_TOKEN;
-    if (required) {
-      const given = Buffer.from(req.headers.get("x-research-token") ?? "");
-      const want = Buffer.from(required);
-      if (given.length !== want.length || !timingSafeEqual(given, want)) {
-        return NextResponse.json({ error: "This server needs an access token for research features.", code: "token" }, { status: 401 });
-      }
+    if (!tokenSatisfied(req.headers, req.headers.get("x-research-token"))) {
+      return NextResponse.json({ error: "This server needs an access token for research features, or your own DataForSEO keys.", code: "token" }, { status: 401 });
     }
     try {
       const location = locationByCode(Number(req.nextUrl.searchParams.get("loc") ?? 2840));
-      const body = await fn(req, { location });
+      const body = await withCredentials(req.headers, () => fn(req, { location }));
       return NextResponse.json(body, { headers: { "cache-control": "no-store" } });
     } catch (e) {
       if (e instanceof BadRequest) return NextResponse.json({ error: e.message }, { status: 400 });

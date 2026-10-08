@@ -155,8 +155,11 @@ export interface BacklinkResearch extends Paid {
 }
 
 export interface ResearchStatus {
+  /** DataForSEO is available: the server's keys, or this browser's own. */
   dataforseo: boolean;
   tokenRequired: boolean;
+  /** True when the browser is using its own keys. */
+  ownKeys?: boolean;
 }
 
 export const LOCATIONS = [

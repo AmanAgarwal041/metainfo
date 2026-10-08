@@ -1,9 +1,10 @@
 // MCP server (Streamable HTTP transport, stateless, JSON responses).
 // Connect from Claude Code with:
 //   claude mcp add --transport http metainfo http://localhost:3000/api/mcp [--header "Authorization: Bearer $RESEARCH_TOKEN"]
+// Bring your own DataForSEO keys with --header "x-dataforseo-login: ..." --header "x-dataforseo-password: ..."
 
 import { NextRequest, NextResponse } from "next/server";
-import { timingSafeEqual } from "node:crypto";
+import { tokenSatisfied, withCredentials } from "@/lib/server/credentials";
 import { dataForSeoConfigured } from "@/lib/server/dataforseo";
 import { TOOLS } from "@/lib/server/mcp-tools";
 
@@ -23,12 +24,8 @@ const ok = (id: RpcRequest["id"], result: unknown) => ({ jsonrpc: "2.0", id, res
 const fail = (id: RpcRequest["id"], code: number, message: string) => ({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
 
 function authorized(req: NextRequest): boolean {
-  const required = process.env.RESEARCH_TOKEN;
-  if (!required) return true;
-  const given = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "") || req.headers.get("x-research-token") || "";
-  const a = Buffer.from(given);
-  const b = Buffer.from(required);
-  return a.length === b.length && timingSafeEqual(a, b);
+  const bearer = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "") || req.headers.get("x-research-token");
+  return tokenSatisfied(req.headers, bearer);
 }
 
 async function handle(msg: RpcRequest): Promise<object | null> {
@@ -70,7 +67,7 @@ async function handle(msg: RpcRequest): Promise<object | null> {
 }
 
 export async function POST(req: NextRequest) {
-  if (!authorized(req)) return NextResponse.json(fail(null, -32001, "Unauthorized: send Authorization: Bearer <RESEARCH_TOKEN>"), { status: 401 });
+  if (!authorized(req)) return NextResponse.json(fail(null, -32001, "Unauthorized: send Authorization: Bearer <RESEARCH_TOKEN>, or your own keys in x-dataforseo-login and x-dataforseo-password headers"), { status: 401 });
   let body: unknown;
   try {
     body = await req.json();
@@ -79,7 +76,7 @@ export async function POST(req: NextRequest) {
   }
   const batch = Array.isArray(body);
   const msgs = (batch ? body : [body]) as RpcRequest[];
-  const responses = (await Promise.all(msgs.map(handle))).filter((r) => r !== null);
+  const responses = (await withCredentials(req.headers, () => Promise.all(msgs.map(handle)))).filter((r) => r !== null);
   if (responses.length === 0) return new NextResponse(null, { status: 202 });
   return NextResponse.json(batch ? responses : responses[0]);
 }

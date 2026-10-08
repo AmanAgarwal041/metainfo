@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "metainfo",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2025-10-01",
+  // nodejs_compat: Next.js server APIs. global_fetch_strictly_public: the scanner
+  // can only reach the public internet, which is the SSRF guard on Workers.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "metainfo"
+    }
+  ],
+  "observability": { "enabled": true }
+  // Secrets (optional): wrangler secret put DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD / RESEARCH_TOKEN
+}

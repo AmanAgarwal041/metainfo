@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useProject } from "@/lib/project";
 import { PageHead } from "../kit";
@@ -77,7 +78,11 @@ export function ProjectBar({ showCompetitors = true }: { showCompetitors?: boole
 export function useResearchStatus(): ResearchStatus | null {
   const [s, setS] = useState<ResearchStatus | null>(null);
   useEffect(() => {
-    researchStatus().then(setS);
+    const load = () => researchStatus().then(setS);
+    load();
+    // Keys entered in Settings change what's available without a reload.
+    window.addEventListener("metainfo:keys", load);
+    return () => window.removeEventListener("metainfo:keys", load);
   }, []);
   return s;
 }
@@ -89,12 +94,10 @@ export function ProviderNotice({ unlocks, free }: { unlocks: string; free?: Reac
       <h3 className="section-title">Connect DataForSEO to unlock {unlocks}</h3>
       <p className="section-sub">
         Search volumes, rankings and backlink data come from DataForSEO&apos;s pay-as-you-go API (no subscription; most lookups cost a
-        fraction of a cent to a few cents). Create an account at dataforseo.com, then add your API credentials to <code>.env.local</code>{" "}
-        and restart the server:
+        fraction of a cent to a few cents). Create an account at dataforseo.com, then add your API login and password in Settings. They
+        stay in this browser and are sent only with your research requests.
       </p>
-      <pre className="code" style={{ padding: "12px 14px" }}>
-        <code>{`DATAFORSEO_LOGIN=you@example.com\nDATAFORSEO_PASSWORD=your-api-password   # from app.dataforseo.com/api-access\nRESEARCH_TOKEN=pick-a-secret            # optional: stops others spending your balance`}</code>
-      </pre>
+      <Link className="btn btn-primary" href="/settings#data">Add your DataForSEO keys</Link>
       {free && <div className="notice" style={{ marginTop: 12 }}>{free}</div>}
     </div>
   );

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createProject, deleteProject, saveProject, selectProject, useProjects } from "@/lib/project";
-import { getToken, setToken } from "@/lib/research-client";
+import { getProviderKeys, getToken, research, setProviderKeys, setToken } from "@/lib/research-client";
 import { LOCATIONS } from "@/lib/research-types";
 import { setTheme, useTheme } from "@/lib/theme";
 import { PageHead } from "./kit";
@@ -103,6 +103,74 @@ function Projects() {
   );
 }
 
+function ProviderKeysForm() {
+  const [login, setLogin] = useState("");
+  const [password, setPassword] = useState("");
+  const [has, setHas] = useState(false);
+  const [state, setState] = useState<{ kind: "idle" | "testing" | "ok" | "error"; msg?: string }>({ kind: "idle" });
+
+  useEffect(() => {
+    const k = getProviderKeys();
+    /* eslint-disable react-hooks/set-state-in-effect -- read keys stored in this browser */
+    setHas(!!k);
+    if (k) setLogin(k.login);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  const test = async () => {
+    setState({ kind: "testing" });
+    try {
+      const a = await research<{ login: string; balance: number | null }>("account", {});
+      setState({ kind: "ok", msg: `Connected as ${a.login}${a.balance != null ? `, balance $${a.balance.toFixed(2)}` : ""}.` });
+    } catch (e) {
+      setState({ kind: "error", msg: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  return (
+    <div>
+      <div className="field-label" style={{ marginBottom: 6 }}>Your DataForSEO keys</div>
+      <p className="small muted" style={{ marginBottom: 10, maxWidth: "75ch" }}>
+        Use your own account instead of the server&apos;s. Keys are saved in this browser only and sent to this app&apos;s server with each research request, where they&apos;re used for that request and never stored. Find them at app.dataforseo.com/api-access (use the API password, not your account password).
+      </p>
+      <form
+        className="row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!login.trim() || !password.trim()) return;
+          setProviderKeys({ login: login.trim(), password: password.trim() });
+          setPassword("");
+          setHas(true);
+          test();
+        }}
+      >
+        <input className="input" style={{ maxWidth: 260 }} value={login} onChange={(e) => setLogin(e.target.value)} placeholder="API login (email)" aria-label="DataForSEO API login" autoComplete="off" />
+        <input className="input" style={{ maxWidth: 260 }} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={has ? "API password (saved)" : "API password"} aria-label="DataForSEO API password" autoComplete="new-password" />
+        <button className="btn btn-primary" type="submit" disabled={!login.trim() || !password.trim()}>Save keys</button>
+        {has && (
+          <>
+            <button type="button" className="btn" onClick={test} disabled={state.kind === "testing"}>{state.kind === "testing" ? "Testing" : "Test keys"}</button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => {
+                setProviderKeys(null);
+                setHas(false);
+                setLogin("");
+                setState({ kind: "idle" });
+              }}
+            >
+              Remove keys
+            </button>
+          </>
+        )}
+      </form>
+      {state.kind === "ok" && <p className="small" style={{ color: "var(--pass)", marginTop: 8 }}>{state.msg}</p>}
+      {state.kind === "error" && <p className="small" style={{ color: "var(--fail)", marginTop: 8 }}>{state.msg}</p>}
+    </div>
+  );
+}
+
 export default function Settings() {
   const status = useResearchStatus();
   const theme = useTheme();
@@ -120,9 +188,24 @@ export default function Settings() {
   }, []);
 
   const mcpUrl = `${origin}/api/mcp`;
-  const authArg = status?.tokenRequired ? ` --header "Authorization: Bearer YOUR_RESEARCH_TOKEN"` : "";
+  const authArg = status?.ownKeys
+    ? ` --header "x-dataforseo-login: YOUR_LOGIN" --header "x-dataforseo-password: YOUR_API_PASSWORD"`
+    : status?.tokenRequired
+      ? ` --header "Authorization: Bearer YOUR_RESEARCH_TOKEN"`
+      : "";
   const cursorJson = JSON.stringify(
-    { mcpServers: { metainfo: { url: mcpUrl, ...(status?.tokenRequired ? { headers: { Authorization: "Bearer YOUR_RESEARCH_TOKEN" } } : {}) } } },
+    {
+      mcpServers: {
+        metainfo: {
+          url: mcpUrl,
+          ...(status?.ownKeys
+            ? { headers: { "x-dataforseo-login": "YOUR_LOGIN", "x-dataforseo-password": "YOUR_API_PASSWORD" } }
+            : status?.tokenRequired
+              ? { headers: { Authorization: "Bearer YOUR_RESEARCH_TOKEN" } }
+              : {}),
+        },
+      },
+    },
     null,
     2,
   );
@@ -138,7 +221,7 @@ export default function Settings() {
     const data: Record<string, string> = {};
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i)!;
-      if (k.startsWith("metainfo:") && k !== "metainfo:research-token") data[k] = localStorage.getItem(k)!;
+      if (k.startsWith("metainfo:") && k !== "metainfo:research-token" && k !== "metainfo:dataforseo-keys") data[k] = localStorage.getItem(k)!;
     }
     download(`metainfo-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 2), "application/json");
   };
@@ -150,20 +233,17 @@ export default function Settings() {
         <Projects />
 
         <Section id="data" title="Data source" sub="Audits, autocomplete keyword ideas, content gaps and audit comparisons are free. Search volumes, rankings, competitors, backlinks and AI answers come from DataForSEO (pay as you go).">
-          <div className="row" style={{ marginBottom: 12 }}>
-            <span className={`badge ${status?.dataforseo ? "gain" : ""}`}>{status == null ? "Checking" : status.dataforseo ? "DataForSEO connected" : "Not connected"}</span>
-            {status?.tokenRequired && <span className="badge accent">Access token required</span>}
+          <div className="row" style={{ marginBottom: 14 }}>
+            <span className={`badge ${status?.dataforseo ? "gain" : ""}`}>
+              {status == null ? "Checking" : status.ownKeys ? "Using your DataForSEO keys" : status.dataforseo ? "Using this server's DataForSEO keys" : "Not connected"}
+            </span>
+            {status?.tokenRequired && !status.ownKeys && <span className="badge accent">Access token required for the server&apos;s keys</span>}
           </div>
-          {!status?.dataforseo && (
-            <>
-              <p className="small" style={{ marginBottom: 8 }}>Add your API credentials to <code>.env.local</code> on the server and restart it:</p>
-              <CodeBlock code={`DATAFORSEO_LOGIN=you@example.com\nDATAFORSEO_PASSWORD=your-api-password   # app.dataforseo.com/api-access\nRESEARCH_TOKEN=pick-a-secret            # recommended when deployed`} />
-            </>
-          )}
-          {status?.tokenRequired && (
+          <ProviderKeysForm />
+          {status?.tokenRequired && !status.ownKeys && (
             <form
               className="row"
-              style={{ marginTop: 12 }}
+              style={{ marginTop: 16 }}
               onSubmit={(e) => {
                 e.preventDefault();
                 setToken(token);
@@ -171,6 +251,7 @@ export default function Settings() {
                 setTimeout(() => setSaved(false), 1500);
               }}
             >
+              <span className="small muted" style={{ width: "100%" }}>Or use this server&apos;s keys with its access token:</span>
               <input className="input" type="password" style={{ maxWidth: 320 }} value={token} onChange={(e) => setTok(e.target.value)} placeholder="Research token" aria-label="Research token" />
               <button className="btn" type="submit">{saved ? "Saved" : "Save token"}</button>
             </form>

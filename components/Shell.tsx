@@ -106,7 +106,10 @@ function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }
   const path = usePathname();
   const [provider, setProvider] = useState<boolean | null>(null);
   useEffect(() => {
-    researchStatus().then((s) => setProvider(s.dataforseo));
+    const load = () => researchStatus().then((s) => setProvider(s.dataforseo));
+    load();
+    window.addEventListener("metainfo:keys", load);
+    return () => window.removeEventListener("metainfo:keys", load);
   }, []);
   return (
     <aside className="sidebar" data-open={open} aria-label="Main navigation">

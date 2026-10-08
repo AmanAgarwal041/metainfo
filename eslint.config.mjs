@@ -4,7 +4,7 @@ import nextTs from "eslint-config-next/typescript";
 const config = [
   ...nextVitals,
   ...nextTs,
-  { ignores: [".next/**", "wasm/**", "public/engine/**", "next-env.d.ts"] },
+  { ignores: [".next/**", ".open-next/**", ".wrangler/**", "wasm/**", "public/engine/**", "next-env.d.ts", "cloudflare-env.d.ts"] },
 ];
 
 export default config;
