@@ -30,6 +30,11 @@ export interface ScanInput {
   botProbes: { bot: string; status?: number | null; error?: string | null }[];
   /** Added by the fetcher, ignored by the engine. */
   fetchMs?: number;
+  /** The DOM after JavaScript, from the rendering service (optional). */
+  renderedHtml?: string | null;
+  renderMs?: number | null;
+  renderedUrl?: string | null;
+  renderError?: string | null;
 }
 
 export interface Check {
@@ -222,6 +227,28 @@ export interface Report {
   llms?: LlmsReport | null;
   crawlers: CrawlerAccess[];
   generated: { headHtml: string; jsonLd: string; robotsTxt: string; llmsTxt: string };
+  render?: RenderDiff | null;
+  fetchedWith?: string | null;
+}
+
+export interface RenderDiff {
+  rawWords: number;
+  renderedWords: number;
+  hiddenWords: number;
+  hiddenPct: number;
+  rawInternalLinks: number;
+  renderedInternalLinks: number;
+  linksOnlyRendered: string[];
+  headingsOnlyRendered: string[];
+  metaChanges: { field: string; raw?: string | null; rendered?: string | null }[];
+  jsonldRaw: string[];
+  jsonldRendered: string[];
+  jsonldOnlyRendered: string[];
+  rawImages: number;
+  renderedImages: number;
+  hiddenSample?: string | null;
+  renderMs?: number | null;
+  redirectedTo?: string | null;
 }
 
 export const PLATFORM_META: Record<Platform, { label: string; short: string; color: string }> = {

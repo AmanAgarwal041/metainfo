@@ -21,6 +21,7 @@ import {
   IconSearch,
   IconSerp,
   IconSettings,
+  IconSitemap,
   IconSun,
   IconTrend,
   IconUsers,
@@ -34,7 +35,8 @@ const NAV: { label?: string; items: Item[] }[] = [
   {
     label: "Optimise",
     items: [
-      { href: "/audit", label: "Site audit", icon: IconAudit },
+      { href: "/audit", label: "Page audit", icon: IconAudit },
+      { href: "/site-audit", label: "Site crawl", icon: IconSitemap },
       { href: "/ai-visibility", label: "AI visibility", icon: IconRobot },
     ],
   },

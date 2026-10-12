@@ -3,6 +3,10 @@
 // and the page again with each crawler's user agent to detect CDN/WAF blocks.
 
 import type { Resource, ScanInput } from "@/lib/types";
+import { renderPage, scraperConfigured } from "./scraper";
+
+/** Identifies the crawler honestly when walking a whole site. */
+const CRAWLER_UA = "Mozilla/5.0 (compatible; MetaInfoBot/1.0; +https://metainfo.agarwal-aman041.workers.dev)";
 
 const BROWSER_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36";
@@ -272,7 +276,7 @@ async function fetchSitemaps(origin: string, robotsBody: string | null, pagePath
   return [...top, ...childRes];
 }
 
-export async function buildBundle(rawUrl: string): Promise<ScanInput> {
+export async function buildBundle(rawUrl: string, opts: { render?: boolean } = {}): Promise<ScanInput> {
   const started = performance.now();
   const target = normalizeUrl(rawUrl);
 
@@ -290,7 +294,8 @@ export async function buildBundle(rawUrl: string): Promise<ScanInput> {
     throw new ScanError(`That URL returned ${contentType}, not an HTML page.`, 422);
   }
 
-  const [robots, llms, probes] = await Promise.all([
+  const wantRender = opts.render !== false && scraperConfigured();
+  const [robots, llms, probes, rendered] = await Promise.all([
     fetchResource(new URL("/robots.txt", origin), TEXT_MAX_BYTES),
     fetchResource(new URL("/llms.txt", origin), TEXT_MAX_BYTES),
     Promise.all(
@@ -303,6 +308,7 @@ export async function buildBundle(rawUrl: string): Promise<ScanInput> {
         }
       }),
     ),
+    wantRender ? renderPage(final.toString()) : Promise.resolve(null),
   ]);
   const robotsOk = robots.status && robots.status < 300 ? robots.body ?? null : null;
   const sitemaps = await fetchSitemaps(origin, robotsOk, final.pathname);
@@ -320,5 +326,29 @@ export async function buildBundle(rawUrl: string): Promise<ScanInput> {
     llms,
     botProbes: probes,
     fetchMs: Math.round(performance.now() - started),
+    renderedHtml: rendered && "html" in rendered ? rendered.html : null,
+    renderMs: rendered && "html" in rendered ? rendered.renderMs : null,
+    renderedUrl: rendered && "html" in rendered ? rendered.finalUrl : null,
+    renderError: rendered && "error" in rendered ? rendered.error : null,
+  };
+}
+
+/** One page, no extras (robots, probes, sitemaps): used by the built-in crawler. */
+export async function fetchPage(rawUrl: string, maxBytes = 200_000) {
+  const target = normalizeUrl(rawUrl);
+  const t0 = performance.now();
+  const r = await fetchFollow(target, { ua: CRAWLER_UA, maxBytes, accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5" });
+  const contentType = r.headers["content-type"] ?? "";
+  const text = r.bytes && /html|xml|text\/plain/i.test(contentType || "text/html") ? await decode(r.bytes, contentType) : "";
+  return {
+    url: target.toString(),
+    finalUrl: r.url,
+    status: r.status,
+    headers: r.headers,
+    contentType,
+    html: text,
+    truncated: !!r.bytes && r.bytes.byteLength >= maxBytes,
+    redirects: r.redirects,
+    ms: Math.round(performance.now() - t0),
   };
 }

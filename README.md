@@ -100,6 +100,71 @@ The UI is built as an "operate" surface: dense, scannable, quiet.
 * **Charts:** they use the validated categorical palette, with one fixed color per platform across the app. They have a crosshair tooltip, a legend and a table view. Ordered buckets use a single-hue ramp.
 * **Empty states:** a single-stroke figure in the Hairline manner that answers the pointer.
 
+## Site crawl and JavaScript rendering (Scrapling)
+
+An optional companion service in `scraper/` uses [Scrapling](https://github.com/D4Vinci/Scrapling) for two things the Worker
+can't do on its own.
+
+* **JavaScript rendering in audits.** The page is rendered in headless Chromium (`DynamicFetcher`), and the Rust engine
+  compares the rendered DOM with the raw HTML:
+  * the share of words that only appear after JavaScript runs;
+  * meta tags rewritten by JavaScript (title, description, canonical, robots, Open Graph);
+  * links, headings and JSON-LD that only appear after rendering;
+  * client-side (meta refresh or JavaScript) redirects.
+
+  This drives the "Content is in the HTML" check with measured numbers and adds three checks: JS meta, JS links and JS
+  structured data. The audit gets a **JS rendering** tab.
+* **Site crawl (`/site-audit`).** `Spider` crawls the site server-side: same host, robots.txt obeyed, `<a>` and image-map
+  links followed, identified as MetaInfoBot. The WASM engine audits every page in the browser, and the crawl adds site-wide
+  findings:
+  * broken and redirecting internal links;
+  * duplicate titles and descriptions;
+  * missing titles, descriptions and H1s;
+  * noindex and canonical problems;
+  * thin, deep and weakly linked pages;
+  * sitemap coverage;
+  * "fix once in your template" issues (checks failing on 60% or more of pages).
+
+  Pages the app-shell heuristic suspects are re-rendered to verify them.
+
+Without the service, audits fall back to the heuristic and site crawls run through a built-in crawler (page by page via
+`/api/page`, also robots-aware). Both produce the same report.
+
+**Deliberately not used:** Scrapling's anti-bot features (`StealthyFetcher`, Cloudflare challenge solving, TLS and browser
+fingerprint impersonation, the fake Google referer). This tool audits other people's sites, so it identifies itself honestly.
+
+```bash
+# local
+cd scraper && uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r requirements.txt
+.venv/bin/scrapling install          # downloads Chromium
+.venv/bin/uvicorn app:app --port 8000
+# then in .env.local: SCRAPER_URL=http://127.0.0.1:8000
+
+# container (any Docker host: Fly.io, Railway, a VPS, Cloudflare Containers on Workers Paid)
+docker build -t metainfo-scraper scraper && docker run -p 8000:8000 -e SCRAPER_TOKEN=secret metainfo-scraper
+# then: wrangler secret put SCRAPER_URL / SCRAPER_TOKEN
+```
+
+Security: the service rejects private and loopback targets, blocks the browser's own subrequests to private networks, and
+requires `x-scraper-token` when `SCRAPER_TOKEN` is set. Run it in a network without access to internal systems anyway.
+
+### Does it help? (measured)
+
+Same engine, raw HTML only (the old heuristic) vs with Scrapling's rendered DOM:
+
+| Page | Heuristic | Measured | What rendering found |
+| --- | --- | --- | --- |
+| excalidraw.com | fail | fail | 98% of words only after JS |
+| app.diagrams.net | fail | fail | 100% of words after JS; title set by JS |
+| airbnb.com | **pass** | **fail** | Non-JS clients get an empty JS-only redirect stub; 7 meta tags and JSON-LD only after JS |
+| paulgraham.com | **fail** | **pass** | Image-based homepage, nothing hidden (heuristic false positive) |
+| htmx.org, react.dev, photopea.com | pass | pass | 0% hidden |
+| stripe.com/pricing | pass | pass | 3% hidden |
+
+Renders take 1.2-2.3 s for most pages and up to about 14 s for pages that never go network-idle. Crawls cover 50 pages of
+htmx.org in about 3-4 s and 100 pages of paulgraham.com in about 8 s with Scrapling, against 5 s and 9 s with the built-in
+crawler. WASM analysis adds about 0.5 s per 100 pages.
+
 ## Architecture
 
 ```

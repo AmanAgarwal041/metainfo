@@ -25,6 +25,13 @@ pub struct ScanInput {
     pub llms: Option<Resource>,
     /// Status codes returned when the page is requested with crawler user agents.
     pub bot_probes: Vec<BotProbe>,
+    /// The page's DOM after a headless browser ran its JavaScript (optional).
+    pub rendered_html: Option<String>,
+    pub render_ms: Option<u32>,
+    /// Where the browser ended up (differs from final_url after a meta-refresh or JS redirect).
+    pub rendered_url: Option<String>,
+    /// How the page HTML was obtained when a plain fetch was refused (e.g. "browser").
+    pub fetched_with: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -281,4 +288,7 @@ pub struct Report {
     pub llms: Option<crate::llms::LlmsReport>,
     pub crawlers: Vec<crate::crawlers::CrawlerAccess>,
     pub generated: Generated,
+    /// Raw HTML vs rendered DOM, when a rendered copy was supplied.
+    pub render: Option<crate::render::RenderDiff>,
+    pub fetched_with: Option<String>,
 }

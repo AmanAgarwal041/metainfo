@@ -47,3 +47,7 @@ yarn-error.log*
 /.open-next
 /.wrangler
 .dev.vars
+
+# scraper service
+/scraper/.venv
+__pycache__/

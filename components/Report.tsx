@@ -5,6 +5,8 @@ import type { TrackedSite } from "@/lib/history";
 import type { Platform, Report as ReportT } from "@/lib/types";
 import type { ScanMeta } from "./App";
 import Crawlers from "./Crawlers";
+import Rendering from "./Rendering";
+import { useResearchStatus } from "./research/common";
 import Generated from "./Generated";
 import History from "./History";
 import Issues from "./Issues";
@@ -14,7 +16,7 @@ import Previews from "./Previews";
 import Tags from "./Tags";
 import { download, ScoreRing } from "./ui";
 
-export type TabId = "overview" | "issues" | "plan" | "crawlers" | "tags" | "previews" | "generated" | "history";
+export type TabId = "overview" | "issues" | "plan" | "crawlers" | "rendering" | "tags" | "previews" | "generated" | "history";
 
 export default function Report({
   report,
@@ -32,6 +34,7 @@ export default function Report({
   onSiteChange: (s: TrackedSite) => void;
 }) {
   const [tab, setTab] = useState<TabId>("overview");
+  const status = useResearchStatus();
   const [platformFilter, setPlatformFilter] = useState<Platform | "all">("all");
   const issues = report.checks.filter((c) => c.status === "fail" || c.status === "warn").length;
   const tasks = report.plan.reduce((n, p) => n + p.tasks.length, 0);
@@ -41,6 +44,7 @@ export default function Report({
     { id: "issues", label: "Issues", count: issues },
     { id: "plan", label: "Fix plan", count: tasks },
     { id: "crawlers", label: "AI & crawlers" },
+    { id: "rendering", label: "JS rendering" },
     { id: "tags", label: "Tags & content" },
     { id: "previews", label: "Previews" },
     { id: "generated", label: "Generated files" },
@@ -125,6 +129,7 @@ export default function Report({
       {tab === "issues" && <Issues report={report} platform={platformFilter} onPlatform={setPlatformFilter} />}
       {tab === "plan" && <Plan report={report} site={site} onSiteChange={onSiteChange} />}
       {tab === "crawlers" && <Crawlers report={report} />}
+      {tab === "rendering" && <Rendering report={report} scraper={!!status?.scraper} />}
       {tab === "tags" && <Tags report={report} />}
       {tab === "previews" && <Previews report={report} />}
       {tab === "generated" && <Generated report={report} />}

@@ -35,3 +35,4 @@ export const IconPlug = make(<><path d="M9 7V3M15 7V3" /><path d="M6 7h12v4a6 6 
 export const IconBolt = make(<path d="M13 3 5 14h6l-1 7 8-11h-6z" />);
 export const IconCheck = make(<path d="m5 12 5 5 9-10" />);
 export const IconRobot = make(<><rect x="5" y="8" width="14" height="11" rx="3" /><path d="M12 4v4M9 13h.01M15 13h.01M9.5 16.5h5" /></>);
+export const IconSitemap = make(<><rect x="9" y="3" width="6" height="5" rx="1" /><rect x="3" y="16" width="6" height="5" rx="1" /><rect x="15" y="16" width="6" height="5" rx="1" /><path d="M12 8v4M6 16v-2h12v2" /></>);

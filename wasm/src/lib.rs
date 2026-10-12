@@ -11,6 +11,7 @@ pub mod generate;
 pub mod keywords;
 pub mod llms;
 pub mod model;
+pub mod render;
 pub mod robots;
 pub mod scoring;
 pub mod sitemap;
@@ -37,6 +38,12 @@ pub fn analyze(input_json: &str) -> String {
 pub fn term_counts(html: &str, terms_json: &str) -> String {
     let terms: Vec<String> = serde_json::from_str(terms_json).unwrap_or_default();
     serde_json::to_string(&extract::term_counts(html, &terms)).unwrap_or_else(|_| "[]".into())
+}
+
+/// Whether a generic crawler (`User-agent: *`) may fetch `path` under this robots.txt.
+#[wasm_bindgen]
+pub fn robots_allows(robots_txt: &str, path: &str) -> bool {
+    robots::Robots::parse(robots_txt).check(&["*"], path).allowed
 }
 
 #[wasm_bindgen]
@@ -103,6 +110,11 @@ pub fn analyze_input(input: &ScanInput) -> Report {
         crawlers::evaluate(rb.as_ref(), &path, &input.bot_probes)
     };
 
+    let render =
+        input.rendered_html.as_deref().filter(|r| !r.trim().is_empty()).map(|r| {
+            render::compare(&page, &input.html, r, url.as_ref(), input.render_ms, input.rendered_url.as_deref())
+        });
+
     let sugg = generate::Suggestions::new(&page, url.as_ref());
     let checks = checks::run(&checks::Ctx {
         input,
@@ -114,6 +126,7 @@ pub fn analyze_input(input: &ScanInput) -> Report {
         crawlers: &crawlers,
         sugg: &sugg,
         html_only,
+        render: render.as_ref(),
     });
 
     let scores = scoring::platform_scores(&checks);
@@ -149,6 +162,8 @@ pub fn analyze_input(input: &ScanInput) -> Report {
         llms: llms_report,
         crawlers,
         generated,
+        render,
+        fetched_with: input.fetched_with.clone(),
     }
 }
 

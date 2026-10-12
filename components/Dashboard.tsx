@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { loadRuns, rates, type AiRun } from "@/lib/ai-visibility";
 import { diffSnapshots, loadSites, siteForDomain, type TrackedSite } from "@/lib/history";
 import { createProject, useProject, useProjects } from "@/lib/project";
+import { loadCrawlHistory } from "@/lib/site-audit";
 import { rankHistory, rankKey } from "@/lib/rank-history";
 import { AI_ENGINES, locationByCode } from "@/lib/research-types";
 import { PLATFORM_META, PLATFORMS } from "@/lib/types";
@@ -50,11 +51,13 @@ export default function Dashboard() {
   const [sites, setSites] = useState<Record<string, TrackedSite>>({});
   const [runs, setRuns] = useState<AiRun[]>([]);
   const [mcpSeen, setMcpSeen] = useState(false);
+  const [crawled, setCrawled] = useState(false);
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- hydrate browser-stored history for the active project */
     setSites(loadSites());
     setRuns(project.id ? loadRuns(project.id) : []);
+    setCrawled(project.id ? loadCrawlHistory(project.id).length > 0 : false);
     try {
       setMcpSeen(localStorage.getItem("metainfo:mcp-copied") === "1");
     } catch {
@@ -93,6 +96,7 @@ export default function Dashboard() {
 
   const steps = [
     { done: !!project.domain, label: "Set your domain", href: "/settings#projects" },
+    { done: crawled, label: "Crawl the whole site", href: "/site-audit" },
     { done: !!site, label: "Audit your site", href: project.domain ? `/audit?url=${encodeURIComponent(`https://${project.domain}/`)}` : "/audit" },
     { done: project.competitors.length > 0, label: "Add competitors", href: "/competitors" },
     { done: project.keywords.length > 0, label: "Track keywords", href: "/rankings" },

@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url");
   if (!url) return NextResponse.json({ error: "Missing ?url=" }, { status: 400 });
   try {
-    const bundle = await buildBundle(url);
+    const bundle = await buildBundle(url, { render: req.nextUrl.searchParams.get("render") !== "0" });
     return NextResponse.json(bundle, { headers: { "cache-control": "no-store" } });
   } catch (e) {
     const status = e instanceof ScanError ? e.status : 500;

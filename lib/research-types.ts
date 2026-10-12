@@ -160,6 +160,8 @@ export interface ResearchStatus {
   tokenRequired: boolean;
   /** True when the browser is using its own keys. */
   ownKeys?: boolean;
+  /** A Scrapling rendering/crawl service is configured. */
+  scraper?: boolean;
 }
 
 export const LOCATIONS = [

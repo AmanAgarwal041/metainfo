@@ -68,3 +68,9 @@ export async function scanMany(urls: string[], onProgress?: (done: number) => vo
   );
   return out;
 }
+
+/** robots.txt check for a generic crawler (same Rust parser the audit uses). */
+export async function robotsAllows(robotsTxt: string, path: string): Promise<boolean> {
+  const engine = await loadEngine();
+  return engine.robots_allows(robotsTxt, path);
+}

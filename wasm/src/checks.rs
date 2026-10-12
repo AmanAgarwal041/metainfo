@@ -32,6 +32,8 @@ pub struct Ctx<'a> {
     pub sugg: &'a Suggestions,
     /// Pasted HTML: no HTTP response, robots, sitemap or probes to look at.
     pub html_only: bool,
+    /// Raw vs rendered comparison, when the page was also rendered in a browser.
+    pub render: Option<&'a crate::render::RenderDiff>,
 }
 
 fn new(
@@ -835,12 +837,82 @@ fn content(cx: &Ctx, v: &mut Vec<Check>) {
 
     let c = new("server-rendered", Cat::Ai, "Content is in the HTML (no JS needed)", Sev::Critical, E::High, &[ChatGPT, Perplexity, Claude, Bing],
         "AI crawlers (GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot) don't run JavaScript. If content only appears after JS runs, they see an empty page. Google renders JS but with a delay.");
-    v.push(if p.spa_shell {
-        c.fail(format!("Only {} words in the raw HTML and an empty app mount point: this looks like a client-side-rendered app.", p.word_count),
-            "Server-render or pre-render the page (Next.js SSR/SSG, Nuxt, Astro, prerender.io) so the main content is in the initial HTML.")
-    } else {
-        c.pass(format!("{} words present without JavaScript.", p.word_count))
+    v.push(match cx.render {
+        Some(r) if r.redirected_to.is_some() => c.warn(
+            format!(
+                "The page redirects in the browser (meta refresh or JavaScript) to {}. Crawlers that don't run JavaScript only see the redirect page ({} words).",
+                r.redirected_to.clone().unwrap_or_default(),
+                r.raw_words
+            ),
+            "Use a server-side 301/302 redirect (or serve the content directly) so every crawler reaches the real page.",
+        ),
+        // Measured: rendered in a browser and compared word by word.
+        Some(r) if r.rendered_words > 0 => {
+            let msg = format!(
+                "{}% of the rendered page's words ({} of {}) only appear after JavaScript runs.",
+                r.hidden_pct, r.hidden_words, r.rendered_words
+            );
+            let fix = "Server-render or pre-render this content (Next.js SSR/SSG, Nuxt, Astro, prerender.io) so it is in the initial HTML.";
+            if r.hidden_pct >= 50 {
+                c.fail(msg, fix)
+            } else if r.hidden_pct >= 20 {
+                c.warn(msg, fix)
+            } else {
+                c.pass(format!("{} of {} rendered words are in the HTML without JavaScript (measured in a browser).", r.rendered_words - r.hidden_words, r.rendered_words))
+            }
+        }
+        _ if p.spa_shell => c.fail(
+            format!("Only {} words in the raw HTML and an empty app mount point: this looks like a client-side-rendered app.", p.word_count),
+            "Server-render or pre-render the page (Next.js SSR/SSG, Nuxt, Astro, prerender.io) so the main content is in the initial HTML.",
+        ),
+        _ => c.pass(format!("{} words present without JavaScript.", p.word_count)),
     });
+
+    if let Some(r) = cx.render.filter(|r| r.redirected_to.is_none()) {
+        let c = new("js-meta", Cat::Indexability, "Meta tags don't depend on JavaScript", Sev::High, E::Medium, &[ChatGPT, Perplexity, Claude, Bing, Social],
+            "AI crawlers and link-preview bots (Slack, LinkedIn, iMessage) read the raw HTML. Title, description, canonical or Open Graph tags set by JavaScript are invisible to them, and Google only sees them after a delayed render.");
+        v.push(if r.meta_changes.is_empty() {
+            c.pass("Title, description, canonical, robots and Open Graph tags are identical before and after JavaScript.")
+        } else {
+            let list = r
+                .meta_changes
+                .iter()
+                .map(|m| format!("{} ({} → {})", m.field, m.raw.clone().unwrap_or_else(|| "missing".into()), m.rendered.clone().unwrap_or_else(|| "removed".into())))
+                .collect::<Vec<_>>()
+                .join("; ");
+            c.fail(format!("JavaScript changes: {list}."), "Output these tags in the server HTML (e.g. Next.js metadata, react-helmet with SSR) rather than setting them on the client.")
+        });
+
+        let c = new("js-links", Cat::Content, "Links work without JavaScript", Sev::Medium, E::Medium, &[Bing, ChatGPT, Perplexity, Claude],
+            "Crawlers that don't render discover pages only through links in the raw HTML. Navigation built by JavaScript hides those pages from them.");
+        v.push(if r.links_only_rendered.is_empty() {
+            c.pass(format!("All {} internal links are in the raw HTML.", r.rendered_internal_links))
+        } else {
+            c.warn(
+                format!(
+                    "{} internal links only exist after JavaScript (e.g. {}).",
+                    r.links_only_rendered.len(),
+                    r.links_only_rendered.iter().take(3).cloned().collect::<Vec<_>>().join(", ")
+                ),
+                "Render navigation and in-content links as plain <a href> elements in the server HTML.",
+            )
+        });
+
+        let c = new("js-structured", Cat::Structured, "Structured data in the HTML", Sev::Medium, E::Low, &[Bing, ChatGPT, Perplexity, Claude, Gemini],
+            "JSON-LD injected by JavaScript (often by tag managers) is missed by crawlers that don't render, and Google picks it up late.");
+        v.push(if r.jsonld_only_rendered.is_empty() {
+            c.pass(if r.jsonld_rendered.is_empty() {
+                "No structured data is added by JavaScript.".to_string()
+            } else {
+                "All structured data is in the raw HTML.".to_string()
+            })
+        } else {
+            c.warn(
+                format!("Added by JavaScript: {}.", r.jsonld_only_rendered.join(", ")),
+                "Emit the JSON-LD in the server-rendered HTML instead of through a tag manager or client script.",
+            )
+        });
+    }
 
     let c = new("word-count", Cat::Content, "Substantial content", Sev::High, E::High, ALL_ENGINES,
         "Thin pages rarely rank or get cited. Answer engines prefer pages that cover a topic in depth with concrete facts.");

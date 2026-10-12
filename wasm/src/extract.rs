@@ -285,6 +285,11 @@ fn keyword_body(doc: &Html) -> Option<String> {
         .map(block_text_of)
 }
 
+/// The main text of a page as keyword analysis sees it (block boundaries as newlines).
+pub fn keyword_text(html: &str) -> String {
+    keyword_body(&Html::parse_document(html)).unwrap_or_default()
+}
+
 /// How often each term (1-3 words) appears in a page's main text.
 pub fn term_counts(html: &str, terms: &[String]) -> Vec<usize> {
     let doc = Html::parse_document(html);
