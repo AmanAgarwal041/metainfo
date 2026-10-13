@@ -9,6 +9,7 @@
 // template problem, fixed once).
 
 import { robotsAllows, runEngine } from "@/lib/engine";
+import { flattenIssues } from "@/lib/schema-utils";
 import type { Report, Severity } from "@/lib/types";
 
 export interface CrawlPage {
@@ -272,6 +273,14 @@ function groupBy<T>(xs: T[], key: (x: T) => string | null | undefined): Map<stri
   return m;
 }
 
+function firstSchemaError(r: Report): string {
+  const sd = r.schema;
+  if (!sd) return "";
+  if (sd.syntaxErrors.length) return sd.syntaxErrors[0];
+  const err = flattenIssues(sd).find((i) => i.severity === "error");
+  return err ? `${err.message} (${err.path})` : "";
+}
+
 export function summarize(result: CrawlResult, audits: PageAudit[], analyzeMs: number): SiteSummary {
   const audited = audits.filter((a) => a.report) as (PageAudit & { report: Report })[];
   const n = Math.max(audited.length, 1);
@@ -317,6 +326,14 @@ export function summarize(result: CrawlResult, audits: PageAudit[], analyzeMs: n
 
   const thin = audited.filter((a) => a.report.page.wordCount < 300 && status(a, "noindex") !== "fail");
   add({ id: "thin", title: "Thin pages (under 300 words)", severity: "medium", pages: thin.map((a) => ({ url: a.page.url, note: `${a.report.page.wordCount} words` })), detail: `${thin.length} indexable pages have little server-rendered text.`, fix: "Expand them with substantive content, merge them into stronger pages, or noindex low-value ones." });
+
+  // Structured data, validated against schema.org and Google's rich-result rules on every page.
+  const sdErrors = audited.filter((a) => (a.report.schema?.errors ?? 0) > 0);
+  add({ id: "schema-errors", title: "Structured data errors", severity: "high", pages: sdErrors.map((a) => ({ url: a.page.url, note: `${a.report.schema!.errors} errors: ${firstSchemaError(a.report)}` })), detail: `${sdErrors.length} pages have schema.org markup that parsers will drop or misread.`, fix: "Open each page in the Schema validator: fix misspelled types and properties, properties on the wrong type and malformed values. Errors repeated on every page live in the template." });
+  const richInvalid = audited.flatMap((a) => (a.report.schema?.richResults ?? []).filter((r) => r.status === "invalid").map((r) => ({ url: a.page.url, note: `${r.feature}: missing ${r.missingRequired.join(", ")}` })));
+  add({ id: "rich-results", title: "Rich results missing required properties", severity: "medium", pages: richInvalid, detail: `${new Set(richInvalid.map((r) => r.url)).size} pages use a rich-result type without its required properties, so Google won't show the rich result.`, fix: "Add the required properties listed per page (see Google's structured data docs)." }, new Set(richInvalid.map((r) => r.url)).size);
+  const sdHidden = audited.filter((a) => (a.report.schema?.notVisible.length ?? 0) > 0);
+  add({ id: "schema-hidden", title: "Markup that isn't on the page", severity: "medium", pages: sdHidden.map((a) => ({ url: a.page.url, note: a.report.schema!.notVisible.slice(0, 3).map((n) => `${n.property} "${n.value}"`).join(", ") })), detail: `${sdHidden.length} pages have names, prices or ratings in structured data that visitors can't see.`, fix: "Google requires markup to describe visible content. Show the values on the page or correct the markup." });
 
   // Measured (rendered) verdicts win over the heuristic.
   const shell = audited.filter((a) => (a.report.render ? a.report.render.hiddenPct >= 50 : a.report.page.spaShell));

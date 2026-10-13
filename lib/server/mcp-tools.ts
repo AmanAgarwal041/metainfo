@@ -2,7 +2,10 @@
 // server functions the UI's API routes use, and returns compact JSON text.
 
 import { buildBundle } from "@/lib/server/fetch-bundle";
-import { analyzeOnServer } from "@/lib/server/engine";
+import { analyzeOnServer, validateSchemaOnServer } from "@/lib/server/engine";
+import { validateUrl } from "@/lib/server/schema";
+import { flattenIssues, itemLabel } from "@/lib/schema-utils";
+import type { SchemaReport } from "@/lib/types";
 import { askEngine } from "@/lib/server/research/ai";
 import { backlinkResearch } from "@/lib/server/research/backlinks";
 import { competitorResearch } from "@/lib/server/research/competitors";
@@ -74,6 +77,41 @@ export const TOOLS: McpTool[] = [
         blocked_crawlers: report.crawlers.filter((c) => !c.allowed).map((c) => c.name),
         topics: report.page.topics.slice(0, 20).map((t) => t.term),
         ...(a.include_generated ? { generated: report.generated } : {}),
+      };
+    },
+  },
+  {
+    name: "validate_schema",
+    title: "Validate structured data (schema.org)",
+    description:
+      "Validate a page's structured data like validator.schema.org: extracts JSON-LD, Microdata and RDFa, and reports unknown types and properties (with suggested fixes), properties used on the wrong type, malformed dates/URLs/numbers/enumeration values and superseded terms. Also checks Google rich-result requirements (Product, Article, Breadcrumb, Event, Recipe, JobPosting, LocalBusiness...) and whether names, prices and ratings in the markup are visible on the page. Pass a url, or html to validate a snippet. Free.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "Page URL to fetch and validate" },
+        html: { type: "string", description: "Alternatively, an HTML page or a <script type=\"application/ld+json\"> snippet" },
+      },
+    },
+    paid: false,
+    run: async (a) => {
+      const compact = (r: SchemaReport) => ({
+        schema_org_version: r.vocabVersion,
+        items: r.items.map((i) => ({ type: itemLabel(i), format: i.format, errors: i.errors, warnings: i.warnings })),
+        errors: r.errors,
+        warnings: r.warnings,
+        issues: flattenIssues(r).slice(0, 60).map(({ severity, path, message }) => ({ severity, at: path, message })),
+        rich_results: r.richResults.map((x) => ({ feature: x.feature, status: x.status, missing_required: x.missingRequired, missing_recommended: x.missingRecommended, note: x.note ?? undefined })),
+        not_visible_on_page: r.notVisible,
+      });
+      if (typeof a.html === "string" && a.html.trim()) return compact(validateSchemaOnServer(a.html));
+      const res = await validateUrl(str(a, "url"));
+      return {
+        url: res.finalUrl,
+        status: res.status,
+        raw_html: compact(res.raw),
+        ...(res.rendered ? { rendered_dom: compact(res.rendered) } : {}),
+        ...(res.renderError ? { render_error: res.renderError } : {}),
+        ...(res.warning ? { warning: res.warning } : {}),
       };
     },
   },

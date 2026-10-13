@@ -13,6 +13,7 @@ pub mod llms;
 pub mod model;
 pub mod render;
 pub mod robots;
+pub mod schema;
 pub mod scoring;
 pub mod sitemap;
 
@@ -115,6 +116,13 @@ pub fn analyze_input(input: &ScanInput) -> Report {
             render::compare(&page, &input.html, r, url.as_ref(), input.render_ms, input.rendered_url.as_deref())
         });
 
+    // Validate what Google sees: the rendered DOM when we have it (and it's the same page).
+    let schema_html = match (&render, input.rendered_html.as_deref()) {
+        (Some(r), Some(h)) if r.redirected_to.is_none() => h,
+        _ => input.html.as_str(),
+    };
+    let schema = schema::validate(schema_html, Some(&schema::visible_text(schema_html)));
+
     let sugg = generate::Suggestions::new(&page, url.as_ref());
     let checks = checks::run(&checks::Ctx {
         input,
@@ -127,6 +135,7 @@ pub fn analyze_input(input: &ScanInput) -> Report {
         sugg: &sugg,
         html_only,
         render: render.as_ref(),
+        schema: &schema,
     });
 
     let scores = scoring::platform_scores(&checks);
@@ -164,7 +173,16 @@ pub fn analyze_input(input: &ScanInput) -> Report {
         generated,
         render,
         fetched_with: input.fetched_with.clone(),
+        schema,
     }
+}
+
+/// Standalone structured-data validation (the Schema validator tool): `html`
+/// is a page or a bare snippet; returns the [`schema::SchemaReport`] as JSON.
+#[wasm_bindgen]
+pub fn validate_schema(html: &str) -> String {
+    let report = schema::validate(html, Some(&schema::visible_text(html)));
+    serde_json::to_string(&report).unwrap_or_else(|e| serde_json::json!({ "error": e.to_string() }).to_string())
 }
 
 #[cfg(test)]

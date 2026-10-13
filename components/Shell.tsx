@@ -18,6 +18,7 @@ import {
   IconMoon,
   IconPlug,
   IconRobot,
+  IconSchema,
   IconSearch,
   IconSerp,
   IconSettings,
@@ -37,6 +38,7 @@ const NAV: { label?: string; items: Item[] }[] = [
     items: [
       { href: "/audit", label: "Page audit", icon: IconAudit },
       { href: "/site-audit", label: "Site crawl", icon: IconSitemap },
+      { href: "/schema", label: "Schema validator", icon: IconSchema },
       { href: "/ai-visibility", label: "AI visibility", icon: IconRobot },
     ],
   },

@@ -229,6 +229,53 @@ export interface Report {
   generated: { headHtml: string; jsonLd: string; robotsTxt: string; llmsTxt: string };
   render?: RenderDiff | null;
   fetchedWith?: string | null;
+  /** schema.org validation (absent on reports saved before the validator existed). */
+  schema?: SchemaReport;
+}
+
+export interface SchemaIssue {
+  severity: "error" | "warning";
+  message: string;
+}
+
+export type SdValue = { kind: "text"; value: string } | { kind: "item"; item: SdItem } | { kind: "ref"; id: string };
+
+export interface SdProp {
+  name: string;
+  values: SdValue[];
+  issues: SchemaIssue[];
+}
+
+export interface SdItem {
+  format: "JSON-LD" | "Microdata" | "RDFa";
+  types: string[];
+  id?: string | null;
+  properties: SdProp[];
+  issues: SchemaIssue[];
+  /** Totals for this item and everything nested in it. */
+  errors: number;
+  warnings: number;
+}
+
+export interface RichResult {
+  feature: string;
+  itemType: string;
+  status: "eligible" | "invalid" | "limited" | "deprecated";
+  missingRequired: string[];
+  missingRecommended: string[];
+  note?: string | null;
+  docs: string;
+}
+
+export interface SchemaReport {
+  vocabVersion: string;
+  items: SdItem[];
+  errors: number;
+  warnings: number;
+  formats: [string, number][];
+  richResults: RichResult[];
+  notVisible: { itemType: string; property: string; value: string }[];
+  syntaxErrors: string[];
 }
 
 export interface RenderDiff {

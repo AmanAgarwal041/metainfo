@@ -291,4 +291,6 @@ pub struct Report {
     /// Raw HTML vs rendered DOM, when a rendered copy was supplied.
     pub render: Option<crate::render::RenderDiff>,
     pub fetched_with: Option<String>,
+    /// schema.org / rich-result validation of the page's structured data.
+    pub schema: crate::schema::SchemaReport,
 }

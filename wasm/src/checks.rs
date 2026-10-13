@@ -34,6 +34,8 @@ pub struct Ctx<'a> {
     pub html_only: bool,
     /// Raw vs rendered comparison, when the page was also rendered in a browser.
     pub render: Option<&'a crate::render::RenderDiff>,
+    /// schema.org validation of every structured-data item on the page.
+    pub schema: &'a crate::schema::SchemaReport,
 }
 
 fn new(
@@ -1045,33 +1047,6 @@ fn content(cx: &Ctx, v: &mut Vec<Check>) {
 
 // ------------------------------------------------------------ structured data
 
-struct TypeRule {
-    types: &'static [&'static str],
-    required: &'static [&'static str],
-}
-
-const TYPE_RULES: &[TypeRule] = &[
-    TypeRule {
-        types: &["Article", "NewsArticle", "BlogPosting"],
-        required: &["headline", "author", "datePublished", "image"],
-    },
-    TypeRule { types: &["Product"], required: &["name", "offers|review|aggregateRating"] },
-    TypeRule { types: &["FAQPage"], required: &["mainEntity"] },
-    TypeRule { types: &["BreadcrumbList"], required: &["itemListElement"] },
-    TypeRule { types: &["Organization", "Corporation"], required: &["name", "url"] },
-    TypeRule { types: &["LocalBusiness", "Restaurant", "Store"], required: &["name", "address"] },
-    TypeRule { types: &["Event"], required: &["name", "startDate", "location"] },
-    TypeRule { types: &["Recipe"], required: &["name", "image"] },
-    TypeRule { types: &["VideoObject"], required: &["name", "thumbnailUrl", "uploadDate"] },
-    TypeRule {
-        types: &["SoftwareApplication", "WebApplication", "MobileApplication"],
-        required: &["name", "offers|aggregateRating|review"],
-    },
-    TypeRule { types: &["JobPosting"], required: &["title", "description", "datePosted", "hiringOrganization"] },
-    TypeRule { types: &["HowTo"], required: &["name", "step"] },
-    TypeRule { types: &["Review"], required: &["itemReviewed", "author", "reviewRating"] },
-];
-
 fn structured(cx: &Ctx, v: &mut Vec<Check>) {
     let p = cx.page;
     let ents = p.ld_entities();
@@ -1156,38 +1131,98 @@ fn structured(cx: &Ctx, v: &mut Vec<Check>) {
         }
     });
 
+    let sr = cx.schema;
+    let c = new(
+        "schema-valid",
+        Cat::Structured,
+        "Valid schema.org vocabulary",
+        Sev::Medium,
+        E::Low,
+        &[Google, Bing, Gemini, ChatGPT, Perplexity],
+        "Misspelled types, properties used on the wrong type and malformed values (dates, URLs, enumerations) are silently dropped by parsers, so the facts never reach search or AI engines. Same rules as validator.schema.org.",
+    );
+    let first_errors = |severity: &str| -> Vec<String> {
+        fn go(i: &crate::schema::SdItem, sev: &str, out: &mut Vec<String>) {
+            out.extend(i.issues.iter().filter(|x| x.severity == sev).map(|x| x.message.clone()));
+            for p in &i.properties {
+                out.extend(p.issues.iter().filter(|x| x.severity == sev).map(|x| x.message.clone()));
+                for v in &p.values {
+                    if let crate::schema::SdValue::Item { item } = v {
+                        go(item, sev, out);
+                    }
+                }
+            }
+        }
+        let mut out = Vec::new();
+        sr.items.iter().for_each(|i| go(i, severity, &mut out));
+        out
+    };
+    v.push(if sr.items.is_empty() {
+        c.info("No structured data items.")
+    } else if sr.errors > 0 {
+        let mut msgs = sr.syntax_errors.clone();
+        msgs.extend(first_errors("error"));
+        c.fail(
+            format!("{} across {}: {}", plural(sr.errors, "error", "errors"), plural(sr.items.len(), "item", "items"), msgs.into_iter().take(3).collect::<Vec<_>>().join(" ")),
+            "Open the Schema tab for every error with its exact location, then fix the type or property names and value formats.",
+        )
+    } else if sr.warnings > 0 {
+        c.warn(
+            format!("{} items valid, {}: {}", sr.items.len(), plural(sr.warnings, "warning", "warnings"), first_errors("warning").into_iter().take(2).collect::<Vec<_>>().join(" ")),
+            "Review the warnings in the Schema tab: values in the wrong format are usually ignored.",
+        )
+    } else {
+        c.pass(format!("{} valid against schema.org {}.", plural(sr.items.len(), "item", "items"), sr.vocab_version))
+    });
+
     let c = new(
         "schema-required",
         Cat::Structured,
-        "Required schema properties",
+        "Rich result requirements",
         Sev::Medium,
         E::Medium,
         &[Google, Gemini, Bing],
         "Google only shows rich results when the type's required properties are present.",
     );
-    let mut problems = Vec::new();
-    for e in &ents {
-        for t in ld_types(e) {
-            if let Some(rule) = TYPE_RULES.iter().find(|r| r.types.contains(&t.as_str())) {
-                let miss: Vec<&str> =
-                    rule.required.iter().copied().filter(|req| !req.split('|').any(|k| e.get(k).is_some())).collect();
-                if !miss.is_empty() {
-                    problems.push(format!(
-                        "{t} missing {}",
-                        miss.iter().map(|m| m.replace('|', " or ")).collect::<Vec<_>>().join(", ")
-                    ));
-                }
-            }
-        }
-    }
-    v.push(if ents.is_empty() {
-        c.info("No schema entities.")
-    } else if problems.is_empty() {
-        c.pass("Known types have their required properties.")
+    let invalid: Vec<String> = sr
+        .rich_results
+        .iter()
+        .filter(|r| r.status == "invalid")
+        .map(|r| format!("{} missing {}", r.feature, r.missing_required.join(", ")))
+        .collect();
+    let eligible: Vec<&str> = sr.rich_results.iter().filter(|r| r.status == "eligible").map(|r| r.feature).collect();
+    v.push(if sr.rich_results.is_empty() {
+        c.info(if sr.items.is_empty() { "No schema entities." } else { "No types that Google shows as rich results." })
+    } else if !invalid.is_empty() {
+        c.fail(format!("{}.", invalid.join("; ")), "Add the missing required properties (see the Schema tab for links to Google's docs per type).")
+    } else if eligible.is_empty() {
+        c.info("Only types with limited or retired rich results (FAQ, How-to).")
     } else {
-        c.fail(
-            format!("{}.", problems.join("; ")),
-            "Add the missing properties (see Google's structured data docs per type).",
+        let mut e = eligible.clone();
+        e.dedup();
+        c.pass(format!("Eligible: {}.", e.join(", ")))
+    });
+
+    let c = new(
+        "schema-visible",
+        Cat::Structured,
+        "Markup matches the visible page",
+        Sev::Medium,
+        E::Low,
+        &[Google, Bing],
+        "Google's guidelines require structured data to describe content users can see. Names, prices and ratings that only exist in the markup can cost the page its rich results or earn a manual action.",
+    );
+    v.push(if sr.items.is_empty() {
+        c.info("No structured data items.")
+    } else if sr.not_visible.is_empty() {
+        c.pass("Names, headlines, prices and ratings in the markup appear on the page.")
+    } else {
+        c.warn(
+            format!(
+                "Not found on the page: {}.",
+                sr.not_visible.iter().take(4).map(|n| format!("{}.{} \"{}\"", n.item_type, n.property, n.value)).collect::<Vec<_>>().join(", ")
+            ),
+            "Show these values on the page, or update the markup so it matches what visitors see. Review widgets that load only on scroll or click count as not visible on first render.",
         )
     });
 

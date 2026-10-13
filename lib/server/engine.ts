@@ -8,7 +8,7 @@
 
 import wasmModule from "@/wasm/pkg/metainfo_bg.wasm?module";
 import * as engine from "@/wasm/pkg/metainfo.js";
-import type { Report, ScanInput } from "@/lib/types";
+import type { Report, ScanInput, SchemaReport } from "@/lib/types";
 
 let ready = false;
 
@@ -24,4 +24,11 @@ export async function analyzeOnServer(input: ScanInput): Promise<Report> {
   const out = JSON.parse(engine.analyze(JSON.stringify(input)));
   if (out.error) throw new Error(out.error);
   return out as Report;
+}
+
+export function validateSchemaOnServer(html: string): SchemaReport {
+  init();
+  const out = JSON.parse(engine.validate_schema(html));
+  if (out.error) throw new Error(out.error);
+  return out as SchemaReport;
 }

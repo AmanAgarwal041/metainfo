@@ -6,6 +6,7 @@ import type { Platform, Report as ReportT } from "@/lib/types";
 import type { ScanMeta } from "./App";
 import Crawlers from "./Crawlers";
 import Rendering from "./Rendering";
+import SchemaView from "./SchemaView";
 import { useResearchStatus } from "./research/common";
 import Generated from "./Generated";
 import History from "./History";
@@ -16,7 +17,7 @@ import Previews from "./Previews";
 import Tags from "./Tags";
 import { download, ScoreRing } from "./ui";
 
-export type TabId = "overview" | "issues" | "plan" | "crawlers" | "rendering" | "tags" | "previews" | "generated" | "history";
+export type TabId = "overview" | "issues" | "plan" | "crawlers" | "rendering" | "schema" | "tags" | "previews" | "generated" | "history";
 
 export default function Report({
   report,
@@ -45,6 +46,7 @@ export default function Report({
     { id: "plan", label: "Fix plan", count: tasks },
     { id: "crawlers", label: "AI & crawlers" },
     { id: "rendering", label: "JS rendering" },
+    { id: "schema", label: "Schema", count: report.schema?.errors },
     { id: "tags", label: "Tags & content" },
     { id: "previews", label: "Previews" },
     { id: "generated", label: "Generated files" },
@@ -130,6 +132,12 @@ export default function Report({
       {tab === "plan" && <Plan report={report} site={site} onSiteChange={onSiteChange} />}
       {tab === "crawlers" && <Crawlers report={report} />}
       {tab === "rendering" && <Rendering report={report} scraper={!!status?.scraper} />}
+      {tab === "schema" &&
+        (report.schema ? (
+          <SchemaView report={report.schema} />
+        ) : (
+          <div className="card card-pad muted small">This report was saved before schema validation existed. Rescan the page to validate its structured data.</div>
+        ))}
       {tab === "tags" && <Tags report={report} />}
       {tab === "previews" && <Previews report={report} />}
       {tab === "generated" && <Generated report={report} />}

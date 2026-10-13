@@ -85,7 +85,7 @@ claude mcp add --transport http metainfo http://localhost:3000/api/mcp
 ```
 
 Tools:
-* Free: `audit_page`, and `keyword_ideas` (ideas only; volumes need DataForSEO).
+* Free: `audit_page`, `validate_schema`, and `keyword_ideas` (ideas only; volumes need DataForSEO).
 * Need DataForSEO: `serp_check`, `keyword_gap`, `find_competitors`, `backlinks`, `ask_ai_engine`. These are hidden from the tool list until it's configured.
 
 ## Design system
@@ -165,6 +165,31 @@ Renders take 1.2-2.3 s for most pages and up to about 14 s for pages that never 
 htmx.org in about 3-4 s and 100 pages of paulgraham.com in about 8 s with Scrapling, against 5 s and 9 s with the built-in
 crawler. WASM analysis adds about 0.5 s per 100 pages.
 
+## Schema validator
+
+`/schema` validates structured data the way [validator.schema.org](https://validator.schema.org/) does, and adds two checks it doesn't do. You can give it a URL or paste a snippet. The validator also runs on every page audit (the **Schema** tab), on every crawled page, as `GET`/`POST /api/schema`, and as the `validate_schema` MCP tool. It's all Rust/WASM (`wasm/src/schema.rs`).
+
+* **Extraction.** Reads JSON-LD (including `@graph` and `@id` references), Microdata and RDFa. RDFa counts only when it uses the schema.org vocabulary, so MediaWiki's `mw:` annotations aren't reported as items. Each item is shown as a tree, with every issue next to the property it belongs to.
+* **schema.org rules.** These cover:
+  * unknown types and properties, with "Did you mean…" suggestions;
+  * a property used as a type;
+  * properties used on the wrong type;
+  * values that aren't a valid Date, DateTime, Time, URL, Number, Integer, Boolean or Duration (including impossible dates like 2025-13-45);
+  * invalid enumeration values (for example `"availability": "in stock"`);
+  * superseded terms;
+  * a missing `@context` or `@type`.
+
+  The vocabulary is the full schema.org release (30.1: 939 types, 1,538 properties and 546 enumeration values), compiled by `node scripts/build-schema-vocab.mjs [version]` into `wasm/src/schema_vocab.json`. Severities follow validator.schema.org.
+* **Google rich results.** Required and recommended properties per Google's docs for Article, Breadcrumb, Product, Product variants, Review, Recipe, Event, Job posting, Local business, Organization, Video, Software app, Course, Dataset, Discussion forum and Profile page. FAQ and How-to are marked as limited or retired.
+* **Visible-content check.** Google requires markup to describe content people can see. Names, headlines, prices and ratings are checked against the page text, allowing for number formats and rounded ratings.
+
+When the Scrapling service is configured, URLs are validated as rendered, which is what Google sees. A notice says how many items exist only after JavaScript runs. Sites that block plain requests (HTTP 403) are still validated through the browser.
+
+**Compared with validator.schema.org.** I checked 12 live pages and a 12-case edge-case snippet against the official validator. Detected types and errors matched, except in these cases:
+* **GitHub.** Its repository pages use `itemType="https://schema.org/abstract"`. `abstract` is a property, not a type; MetaInfo reports the error and the official validator misses it.
+* **Missing `@context`.** The official validator silently drops a block without `@context`; MetaInfo reports it.
+* **Blocked pages.** allrecipes and seriouseats answer HTTP 403 to plain requests; through the renderer, their Recipe markup is validated.
+
 ## Architecture
 
 ```
@@ -231,6 +256,12 @@ curl "https://your-host/api/report?url=example.com"
 
 # Compact summary; responds 422 if the overall score is below `min` (fail the pipeline)
 curl -f "https://your-host/api/report?url=example.com/pricing&format=summary&min=80"
+
+# Structured data: a live page (raw HTML, plus the rendered DOM when the scraper is configured)
+curl "https://your-host/api/schema?url=example.com/product"
+
+# ...or a file or snippet
+curl --data-binary @page.html "https://your-host/api/schema"
 ```
 
 ## Notes and limits

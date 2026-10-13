@@ -1,6 +1,6 @@
 // Browser-side engine: loads the WASM module once and runs scans locally.
 
-import type { Report, ScanInput } from "@/lib/types";
+import type { Report, ScanInput, SchemaReport } from "@/lib/types";
 
 type Engine = typeof import("@/wasm/pkg/metainfo.js");
 let loading: Promise<Engine> | null = null;
@@ -73,4 +73,12 @@ export async function scanMany(urls: string[], onProgress?: (done: number) => vo
 export async function robotsAllows(robotsTxt: string, path: string): Promise<boolean> {
   const engine = await loadEngine();
   return engine.robots_allows(robotsTxt, path);
+}
+
+/** schema.org + rich-result validation of a page or a bare markup snippet. */
+export async function validateSchema(html: string): Promise<SchemaReport> {
+  const engine = await loadEngine();
+  const out = JSON.parse(engine.validate_schema(html));
+  if (out.error) throw new Error(out.error);
+  return out as SchemaReport;
 }
