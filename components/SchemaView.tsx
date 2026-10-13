@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import { flattenIssues, itemLabel, shortType } from "@/lib/schema-utils";
 import type { RichResult, SchemaIssue, SchemaReport, SdItem, SdValue } from "@/lib/types";
 import { Kpi } from "./kit";
@@ -21,25 +21,80 @@ function Issue({ i }: { i: SchemaIssue }) {
   );
 }
 
-function Value({ v }: { v: SdValue }) {
-  if (v.kind === "item") return <div className="sd-val sd-nested"><Node item={v.item} /></div>;
-  if (v.kind === "ref") return <div className="sd-val mono small">→ {v.id}</div>;
-  const link = /^https?:\/\//.test(v.value);
+/** Items by @id, so references ({"@id": "#speakable"}) render the node they point at. */
+const Ids = createContext<Map<string, SdItem>>(new Map());
+
+function indexIds(items: SdItem[]): Map<string, SdItem> {
+  const out = new Map<string, SdItem>();
+  const go = (i: SdItem) => {
+    // Keep the fullest copy when an @id is repeated (a stub reference and the real node).
+    if (i.id && (out.get(i.id)?.properties.length ?? -1) < i.properties.length) out.set(i.id, i);
+    for (const p of i.properties) for (const v of p.values) if (v.kind === "item") go(v.item);
+  };
+  items.forEach(go);
+  return out;
+}
+
+function resolve(ids: Map<string, SdItem>, id: string): SdItem | undefined {
+  const exact = ids.get(id);
+  if (exact?.properties.length) return exact;
+  // "#speakable" and "https://site.com/page#speakable" name the same node; prefer the copy with properties.
+  const frag = id.includes("#") ? id.slice(id.indexOf("#")) : null;
+  const byFrag = frag ? [...ids.entries()].find(([k, v]) => k !== id && k.endsWith(frag) && v.properties.length)?.[1] : undefined;
+  return byFrag ?? exact;
+}
+
+function LongText({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  if (text.length <= 400) return <>{text}</>;
+  return (
+    <>
+      <span style={{ whiteSpace: "pre-wrap" }}>{open ? text : `${text.slice(0, 400).trimEnd()}…`}</span>{" "}
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOpen(!open)} aria-expanded={open}>
+        {open ? "Show less" : `Show more (${text.length.toLocaleString()} characters)`}
+      </button>
+    </>
+  );
+}
+
+function Value({ v, path }: { v: SdValue; path: string[] }) {
+  const ids = useContext(Ids);
+  if (v.kind === "item") {
+    // A typed stub ({"@id": "#speakable", "@type": "SpeakableSpecification"}) stands for the full node elsewhere.
+    const full = !v.item.properties.length && v.item.id ? resolve(ids, v.item.id) : undefined;
+    const item = full && full.properties.length && !path.includes(full.id ?? "") ? full : v.item;
+    return <div className="sd-val sd-nested"><Node item={item} path={path} /></div>;
+  }
+  if (v.kind === "ref") {
+    const target = resolve(ids, v.id);
+    // Show the referenced node inline, unless it's already open above us (circular @id links).
+    if (target && target.properties.length && !path.includes(target.id ?? "")) {
+      return <div className="sd-val sd-nested"><Node item={target} path={path} /></div>;
+    }
+    return (
+      <div className="sd-val">
+        <span className="mono small">{v.id}</span>
+        {!target && <span className="muted small"> (reference to an item not on this page)</span>}
+        {target && path.includes(target.id ?? "") && <span className="muted small"> (shown above)</span>}
+      </div>
+    );
+  }
+  const link = /^https?:\/\/\S+$/.test(v.value);
   return (
     <div className="sd-val">
-      {link ? <a href={v.value} target="_blank" rel="noreferrer noopener" className="small">{v.value}</a> : v.value.length > 400 ? `${v.value.slice(0, 400)}…` : v.value}
+      {link ? <a href={v.value} target="_blank" rel="noreferrer noopener" className="small">{v.value}</a> : <LongText text={v.value} />}
     </div>
   );
 }
 
 /** Long lists (50 product variants, 100 list items) start collapsed to the first few. */
-function Values({ values }: { values: SdValue[] }) {
+function Values({ values, path }: { values: SdValue[]; path: string[] }) {
   const [all, setAll] = useState(false);
   if (!values.length) return <div><span className="na">empty</span></div>;
   const shown = all ? values : values.slice(0, 3);
   return (
     <div>
-      {shown.map((v, j) => <Value v={v} key={j} />)}
+      {shown.map((v, j) => <Value v={v} path={path} key={j} />)}
       {values.length > 3 && (
         <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 4 }} onClick={() => setAll(!all)}>
           {all ? "Show fewer" : `Show all ${values.length}`}
@@ -49,18 +104,30 @@ function Values({ values }: { values: SdValue[] }) {
   );
 }
 
-function Node({ item }: { item: SdItem }) {
+function Node({ item, path = [] }: { item: SdItem; path?: string[] }) {
+  const here = item.id ? [...path, item.id] : path;
   return (
     <div className="sd-tree">
       <div className="sd-node-head">
         <b>{itemLabel(item)}</b>
-        {item.id && <span className="mono muted small">@id {item.id}</span>}
       </div>
       {item.issues.map((i, k) => <div className="sd-prop" key={`i${k}`} style={{ borderTop: 0 }}><Issue i={i} /></div>)}
+      <div className="sd-prop">
+        <div className="sd-name">@type</div>
+        <div>
+          {item.types.length ? item.types.map((t) => <div className="sd-val" key={t}>{shortType(t)}</div>) : <span className="na">missing</span>}
+        </div>
+      </div>
+      {item.id && (
+        <div className="sd-prop">
+          <div className="sd-name">@id</div>
+          <div className="sd-val">{item.id}</div>
+        </div>
+      )}
       {item.properties.map((p, k) => (
         <div className="sd-prop" key={p.name + k}>
           <div className="sd-name">{shortType(p.name)}</div>
-          <Values values={p.values} />
+          <Values values={p.values} path={here} />
           {p.issues.map((i, j) => <Issue i={i} key={j} />)}
         </div>
       ))}
@@ -111,6 +178,7 @@ export default function SchemaView({ report, rawCompare }: { report: SchemaRepor
   const item = report.items[Math.min(sel, report.items.length - 1)];
   const formats = report.formats.map(([f, n]) => `${n} ${f}`).join(", ");
   const jsOnly = rawCompare ? report.items.length - rawCompare.items.length : 0;
+  const ids = useMemo(() => indexIds(report.items), [report]);
 
   return (
     <div className="stack">
@@ -191,7 +259,11 @@ export default function SchemaView({ report, rawCompare }: { report: SchemaRepor
                 </button>
               ))}
             </div>
-            {item && <Node item={item} />}
+            {item && (
+              <Ids.Provider value={ids}>
+                <Node item={item} />
+              </Ids.Provider>
+            )}
           </div>
         )}
       </section>
