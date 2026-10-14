@@ -21,7 +21,7 @@ function init() {
 
 export async function analyzeOnServer(input: ScanInput): Promise<Report> {
   init();
-  const out = JSON.parse(engine.analyze(JSON.stringify(input)));
+  const out = JSON.parse(engine.analyze(JSON.stringify({ nowMs: Date.now(), ...input })));
   if (out.error) throw new Error(out.error);
   return out as Report;
 }

@@ -2,7 +2,7 @@
 // redirects by hand so the chain is recorded), robots.txt, llms.txt, sitemaps,
 // and the page again with each crawler's user agent to detect CDN/WAF blocks.
 
-import type { Resource, ScanInput } from "@/lib/types";
+import type { Probe, Resource, ScanInput } from "@/lib/types";
 import { renderPage, scraperConfigured } from "./scraper";
 
 /** Identifies the crawler honestly when walking a whole site. */
@@ -295,7 +295,18 @@ export async function buildBundle(rawUrl: string, opts: { render?: boolean } = {
   }
 
   const wantRender = opts.render !== false && scraperConfigured();
-  const [robots, llms, probes, rendered] = await Promise.all([
+  // Two header-only probes: a URL that can't exist (soft 404s), and the page as markdown for agents.
+  const probe = async (url: URL, accept?: string): Promise<Probe> => {
+    try {
+      const r = await fetchFollow(url, { ua: BROWSER_UA, maxBytes: 0, headersOnly: true, accept });
+      // A redirect is reported as the first hop's status (e.g. 302 to the homepage).
+      return { url: url.toString(), status: r.redirects[0]?.status ?? r.status, contentType: r.headers["content-type"] ?? null, vary: r.headers["vary"] ?? null };
+    } catch (e) {
+      return { url: url.toString(), status: null, error: errMessage(e) };
+    }
+  };
+  const missing = new URL(`/metainfo-check-${Math.random().toString(36).slice(2, 10)}-404`, origin);
+  const [robots, llms, probes, rendered, soft404, markdown] = await Promise.all([
     fetchResource(new URL("/robots.txt", origin), TEXT_MAX_BYTES),
     fetchResource(new URL("/llms.txt", origin), TEXT_MAX_BYTES),
     Promise.all(
@@ -309,6 +320,8 @@ export async function buildBundle(rawUrl: string, opts: { render?: boolean } = {
       }),
     ),
     wantRender ? renderPage(final.toString()) : Promise.resolve(null),
+    probe(missing),
+    probe(final, "text/markdown, text/html;q=0.5"),
   ]);
   const robotsOk = robots.status && robots.status < 300 ? robots.body ?? null : null;
   const sitemaps = await fetchSitemaps(origin, robotsOk, final.pathname);
@@ -330,6 +343,8 @@ export async function buildBundle(rawUrl: string, opts: { render?: boolean } = {
     renderMs: rendered && "html" in rendered ? rendered.renderMs : null,
     renderedUrl: rendered && "html" in rendered ? rendered.finalUrl : null,
     renderError: rendered && "error" in rendered ? rendered.error : null,
+    soft404,
+    markdown,
   };
 }
 

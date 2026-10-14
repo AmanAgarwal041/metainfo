@@ -6,6 +6,7 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 import { bareDomain } from "@/lib/research-types";
+import { setLocal } from "@/lib/store";
 
 export interface Project {
   id: string;
@@ -65,7 +66,7 @@ function readStore(): Store {
         const p = JSON.parse(legacy);
         const proj = blankProject({ domain: p.domain, competitors: p.competitors, location: p.location });
         raw = JSON.stringify({ projects: [proj], activeId: proj.id });
-        localStorage.setItem(KEY, raw);
+        setLocal(KEY, raw);
       }
     }
   } catch {
@@ -85,7 +86,7 @@ function readStore(): Store {
 
 function writeStore(s: Store) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(s));
+    setLocal(KEY, JSON.stringify(s));
   } catch {
     /* storage blocked */
   }

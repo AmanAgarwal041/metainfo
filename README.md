@@ -190,6 +190,39 @@ When the Scrapling service is configured, URLs are validated as rendered, which 
 * **Missing `@context`.** The official validator silently drops a block without `@context`; MetaInfo reports it.
 * **Blocked pages.** allrecipes and seriouseats answer HTTP 403 to plain requests; through the renderer, their Recipe markup is validated.
 
+## Accounts and teams (optional)
+
+Every tool works without signing in. Signing in saves your workspace to an account, syncs it across devices, and shares it with a team. The workspace is your projects, scan history and tracking, rank checks, crawls and AI-visibility runs. The design follows socialbrewery's auth:
+
+* **Sign-in.** Google (OIDC with PKCE) or GitHub OAuth, with no passwords. Accounts with the same verified email are merged. The first sign-in creates an organisation.
+* **Sessions.** A random token in an HttpOnly, SameSite=Lax cookie (`mi_session`, 30 days). Only its SHA-256 hash is stored. State-changing requests must come from the same origin.
+* **Organisations.** Roles are owner, admin and member. Admins invite people with a link, which only the invited email can accept and which expires after 14 days. Every organisation keeps at least one owner. You can belong to several organisations and switch between them from the account menu.
+* **Saving progress.** On first sign-in, work done anonymously in that browser is merged into the account. After that, changes sync a moment after they happen. Each item carries a version number, so concurrent edits on two devices are merged instead of overwritten. Switching organisation swaps in that organisation's workspace. Signing out clears the browser copy.
+* **Never uploaded:** DataForSEO keys, the research token and the theme.
+
+Storage is Cloudflare D1 (`migrations/`). To set it up:
+
+```bash
+npx wrangler d1 migrations apply metainfo --remote      # --local for next dev
+npx wrangler secret put APP_URL                          # e.g. https://metainfo.example.com
+npx wrangler secret put GOOGLE_AUTH_CLIENT_ID            # and _SECRET; and/or GITHUB_AUTH_CLIENT_ID/_SECRET
+```
+
+OAuth callback URLs are `${APP_URL}/auth/google/callback` and `${APP_URL}/auth/github/callback`. For local development, `AUTH_DEV_LOGIN=1 npm run dev` adds a test sign-in, which is ignored in production. With no provider configured, the sign-in button doesn't appear.
+
+## AI citation readiness (GEO)
+
+The **AI citations** report tab and its checks are deterministic ports of four open-source SEO skills: geo-seo-claude's passage citability scorer, claude-seo's content-quality, claim and drift checks, marketingskills' seo-audit checklist and firecrawl's seo-audit report structure. They run in the WASM engine; no LLM is involved.
+
+* **Passage citability.** The main content is split at headings. Each prose section is scored out of 100: answer quality 30, self-containment 25, readability 20, statistics and sources 15, originality 10. The page grade (A ≥80 … D ≥35) is the mean of the five best sections, and the weakest sections get specific rewrite reasons. Lists, ingredient blocks, pricing cards and "See also" sections aren't scored.
+* **Answer-first.** Every question heading should be followed by a direct answer (40–60 words is ideal), and a definition early in the page helps.
+* **Claims and sources.** Statistics and research claims should have a link or attribution in the same paragraph.
+* **Phrasing.** Filler and stock AI phrases are counted per 1,000 words.
+* **Freshness.** Age tiers: under 3 months, 6 months, 1 year and 2 years. Also flagged: a year in the title older than the current year, and time-relative words.
+* **Trust and entity graph.** About, contact, privacy and terms links (policies on a parent domain count), author schema, `sameAs` profiles, `@id` references and `knowsAbout`.
+* **GEO score.** Uses claude-seo's weights: citability 25, structure 20, multi-modal 15, authority 20, technical access 20.
+* **Also new:** soft-404 detection (a made-up URL must return 404), security headers, markdown content negotiation for agents, and drift alerts between scans (title, H1 or canonical changed; noindex added; schema types removed; H2 outline changed; GEO score down 10 or more).
+
 ## Architecture
 
 ```

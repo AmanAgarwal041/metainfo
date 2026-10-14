@@ -16,7 +16,7 @@ export function loadEngine(): Promise<Engine> {
 export async function runEngine(input: ScanInput): Promise<{ report: Report; analyzeMs: number }> {
   const engine = await loadEngine();
   const t0 = performance.now();
-  const out = JSON.parse(engine.analyze(JSON.stringify(input)));
+  const out = JSON.parse(engine.analyze(JSON.stringify({ nowMs: Date.now(), ...input })));
   const analyzeMs = performance.now() - t0;
   if (out.error) throw new Error(out.error);
   return { report: out as Report, analyzeMs };

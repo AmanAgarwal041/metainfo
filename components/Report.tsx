@@ -6,6 +6,7 @@ import type { Platform, Report as ReportT } from "@/lib/types";
 import type { ScanMeta } from "./App";
 import Crawlers from "./Crawlers";
 import Rendering from "./Rendering";
+import Geo from "./Geo";
 import SchemaView from "./SchemaView";
 import { useResearchStatus } from "./research/common";
 import Generated from "./Generated";
@@ -17,7 +18,7 @@ import Previews from "./Previews";
 import Tags from "./Tags";
 import { download, ScoreRing } from "./ui";
 
-export type TabId = "overview" | "issues" | "plan" | "crawlers" | "rendering" | "schema" | "tags" | "previews" | "generated" | "history";
+export type TabId = "overview" | "issues" | "plan" | "crawlers" | "geo" | "rendering" | "schema" | "tags" | "previews" | "generated" | "history";
 
 export default function Report({
   report,
@@ -45,6 +46,7 @@ export default function Report({
     { id: "issues", label: "Issues", count: issues },
     { id: "plan", label: "Fix plan", count: tasks },
     { id: "crawlers", label: "AI & crawlers" },
+    { id: "geo", label: "AI citations" },
     { id: "rendering", label: "JS rendering" },
     { id: "schema", label: "Schema", count: report.schema?.errors },
     { id: "tags", label: "Tags & content" },
@@ -131,6 +133,7 @@ export default function Report({
       {tab === "issues" && <Issues report={report} platform={platformFilter} onPlatform={setPlatformFilter} />}
       {tab === "plan" && <Plan report={report} site={site} onSiteChange={onSiteChange} />}
       {tab === "crawlers" && <Crawlers report={report} />}
+      {tab === "geo" && <Geo report={report} />}
       {tab === "rendering" && <Rendering report={report} scraper={!!status?.scraper} />}
       {tab === "schema" &&
         (report.schema ? (

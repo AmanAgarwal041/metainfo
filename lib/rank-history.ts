@@ -1,6 +1,8 @@
 // Rank tracking: every SERP check records where you and your competitors
 // ranked, so positions can be followed over time. Stored in this browser.
 
+import { setLocal } from "@/lib/store";
+
 export interface RankCheck {
   checkedAt: string;
   /** Domain → position (null = not in the checked results). */
@@ -34,7 +36,7 @@ export function recordRanks(key: string, check: RankCheck): RankCheck[] {
   const list = [...(all[key] ?? []), check].slice(-MAX);
   all[key] = list;
   try {
-    localStorage.setItem(KEY, JSON.stringify(all));
+    setLocal(KEY, JSON.stringify(all));
   } catch {
     /* storage full or blocked */
   }

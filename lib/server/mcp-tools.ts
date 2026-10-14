@@ -76,6 +76,13 @@ export const TOOLS: McpTool[] = [
           .map((c) => ({ id: c.id, status: c.status, severity: c.severity, title: c.title, finding: c.finding, fix: c.recommendation, snippet: c.snippet })),
         blocked_crawlers: report.crawlers.filter((c) => !c.allowed).map((c) => c.name),
         topics: report.page.topics.slice(0, 20).map((t) => t.term),
+        ai_citation_readiness: report.geo && {
+          geo_score: report.geo.score,
+          citability: { grade: report.geo.citability.grade, score: report.geo.citability.score, rewrite_first: report.geo.citability.bottom.map((p) => ({ heading: p.heading, score: p.score })) },
+          unanswered_questions: report.geo.answers.unanswered,
+          unsourced_claims: report.geo.evidence.uncitedExamples,
+          freshness: report.geo.freshness.tier,
+        },
         ...(a.include_generated ? { generated: report.generated } : {}),
       };
     },

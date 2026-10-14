@@ -8,6 +8,7 @@ import { setTheme, useTheme } from "@/lib/theme";
 import { PageHead } from "./kit";
 import { useResearchStatus } from "./research/common";
 import { CodeBlock, CopyButton, download } from "./ui";
+import { removeLocal, setLocal } from "@/lib/store";
 
 function Section({ id, title, sub, children }: { id: string; title: string; sub?: string; children: React.ReactNode }) {
   return (
@@ -221,7 +222,7 @@ export default function Settings() {
     const data: Record<string, string> = {};
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i)!;
-      if (k.startsWith("metainfo:") && k !== "metainfo:research-token" && k !== "metainfo:dataforseo-keys") data[k] = localStorage.getItem(k)!;
+      if (k.startsWith("metainfo:") && k !== "metainfo:research-token" && k !== "metainfo:dataforseo-keys" && k !== "metainfo:sync:v1") data[k] = localStorage.getItem(k)!;
     }
     download(`metainfo-backup-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(data, null, 2), "application/json");
   };
@@ -303,7 +304,7 @@ export default function Settings() {
                     let n = 0;
                     for (const [k, v] of Object.entries(data)) {
                       if (k.startsWith("metainfo:") && typeof v === "string") {
-                        localStorage.setItem(k, v);
+                        setLocal(k, v);
                         n++;
                       }
                     }
@@ -321,7 +322,7 @@ export default function Settings() {
                   className="btn"
                   style={{ color: "var(--fail)" }}
                   onClick={() => {
-                    Object.keys(localStorage).filter((k) => k.startsWith("metainfo:")).forEach((k) => localStorage.removeItem(k));
+                    Object.keys(localStorage).filter((k) => k.startsWith("metainfo:")).forEach((k) => removeLocal(k));
                     window.location.reload();
                   }}
                 >

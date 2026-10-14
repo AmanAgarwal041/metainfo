@@ -36,6 +36,7 @@ pub struct Ctx<'a> {
     pub render: Option<&'a crate::render::RenderDiff>,
     /// schema.org validation of every structured-data item on the page.
     pub schema: &'a crate::schema::SchemaReport,
+    pub geo: &'a crate::geo::GeoReport,
 }
 
 fn new(
@@ -1043,6 +1044,159 @@ fn content(cx: &Ctx, v: &mut Vec<Check>) {
     } else {
         c.warn("No headings phrased as questions.", "Add an FAQ section or rephrase key H2s as the questions your audience asks, with a 1-2 sentence answer right below.")
     });
+    geo(cx, v);
+}
+
+// ------------------------------------------------------------ GEO (AI citation readiness)
+
+fn geo(cx: &Ctx, v: &mut Vec<Check>) {
+    let g = cx.geo;
+
+    let c = new("citability", Cat::Ai, "Quotable passages", Sev::High, E::Medium, &[ChatGPT, Perplexity, Claude, Gemini, Google],
+        "AI answers quote self-contained passages: a direct answer in the first sentence, specific facts and numbers, a named subject, 130-170 words. Each section is scored like geo-seo-claude's citability rubric.");
+    let ci = &g.citability;
+    v.push(if ci.passages == 0 {
+        c.info("No passages of 20+ words in the main content.")
+    } else if ci.score >= 65 {
+        c.pass(format!("Grade {} ({}/100). {}% of {} sections score above 70.", ci.grade, ci.score, ci.coverage, ci.passages))
+    } else {
+        let weakest = ci.bottom.first().map(|p| format!(" Weakest: \"{}\" ({}/100).", p.heading.clone().unwrap_or_else(|| crate::extract::truncate_chars(&p.excerpt, 60)), p.score)).unwrap_or_default();
+        let finding = format!("Grade {} ({}/100) across {} sections.{weakest}", ci.grade, ci.score, ci.passages);
+        let fix = "Rewrite the weakest sections answer-first: open with a one-sentence answer that names the subject, add a specific number or source, keep each section to roughly 130-170 words, and avoid opening with \"This/It/However\". See the AI citations tab.";
+        if ci.score < 35 { c.fail(finding, fix) } else { c.warn(finding, fix) }
+    });
+
+    let c = new("answer-first", Cat::Ai, "Questions answered directly", Sev::Medium, E::Low, &[ChatGPT, Perplexity, Claude, Gemini, Google],
+        "A question heading followed straight away by a 40-60 word answer is the shape AI Overviews and answer engines lift. About 44% of AI citations come from the first third of a page.");
+    let a = &g.answers;
+    v.push(if a.question_headings == 0 {
+        c.info(if a.early_definition { "No question headings; the page opens with a definition." } else { "No question headings." })
+    } else if a.unanswered.is_empty() {
+        c.pass(format!("All {} question headings are followed by a direct answer.", a.question_headings))
+    } else {
+        c.warn(
+            format!("{} of {} question headings lack a direct answer below them: {}.", a.unanswered.len(), a.question_headings, a.unanswered.iter().map(|q| format!("\"{q}\"")).collect::<Vec<_>>().join(", ")),
+            "Put a 40-60 word answer in the first paragraph under each question, before any detail or caveats.",
+        )
+    });
+
+    let c = new("evidence", Cat::Ai, "Claims backed by sources", Sev::Medium, E::Medium, &[ChatGPT, Perplexity, Claude, Gemini],
+        "Answer engines prefer sources whose statistics and claims are attributed. A link or 'according to X' next to a figure makes it citable and checkable.");
+    let ev = &g.evidence;
+    v.push(if ev.claims < 3 {
+        c.info(format!("{} factual {} found; {} statistics per 500 words.", ev.claims, if ev.claims == 1 { "claim" } else { "claims" }, ev.stats_per_500))
+    } else if ev.cited * 2 >= ev.claims {
+        c.pass(format!("{} of {} claims have a source nearby; {} statistics per 500 words.", ev.cited, ev.claims, ev.stats_per_500))
+    } else {
+        c.warn(
+            format!("Only {} of {} claims cite a source. For example: \"{}\"", ev.cited, ev.claims, ev.uncited_examples.first().cloned().unwrap_or_default()),
+            "Link each statistic or claim to its source (or attribute it: \"according to …\"), and prefer primary research.",
+        )
+    });
+
+    let c = new("ai-phrasing", Cat::Content, "Concise, specific phrasing", Sev::Low, E::Medium, &[ChatGPT, Perplexity, Claude, Google],
+        "Filler and stock AI-writing phrases (\"delve\", \"in today's fast-paced world\", \"it's important to note\") dilute passages and signal unedited content.");
+    let ph = &g.phrasing;
+    let flagged = ph.ai_per_1k >= 2.7 || ph.filler_per_1k >= 2.0;
+    let list = |xs: &[(String, usize)]| xs.iter().take(5).map(|(p, n)| if *n > 1 { format!("\"{p}\" ×{n}") } else { format!("\"{p}\"") }).collect::<Vec<_>>().join(", ");
+    v.push(if !flagged {
+        c.pass(if ph.ai_patterns.is_empty() && ph.filler.is_empty() { "No filler or stock AI phrases.".to_string() } else { format!("Occasional: {}.", list(&[ph.ai_patterns.clone(), ph.filler.clone()].concat())) })
+    } else {
+        c.warn(
+            format!("{:.1} stock AI phrases and {:.1} filler phrases per 1,000 words: {}.", ph.ai_per_1k, ph.filler_per_1k, list(&[ph.ai_patterns.clone(), ph.filler.clone()].concat())),
+            "Edit for plain, specific language: cut filler, replace stock phrases with the concrete point.",
+        )
+    });
+
+    let c = new("trust-pages", Cat::Ai, "Trust pages linked", Sev::Low, E::Low, &[Google, ChatGPT, Perplexity, Claude, Gemini],
+        "Google's quality raters and AI engines look for who stands behind a site: about, contact, privacy and terms pages, and for editorial content a corrections or methodology page.");
+    let t = &g.trust;
+    let missing: Vec<&str> = [("about", t.about), ("contact", t.contact), ("privacy policy", t.privacy), ("terms", t.terms)].iter().filter(|(_, ok)| !ok).map(|(n, _)| *n).collect();
+    v.push(if cx.html_only && cx.page.links.is_empty() {
+        c.info("No links to check.")
+    } else if missing.is_empty() {
+        c.pass(format!("About, contact, privacy and terms pages are linked{}.", if t.editorial { ", plus an editorial policy" } else { "" }))
+    } else {
+        c.warn(format!("No link to: {}.", missing.join(", ")), "Link these from the footer of every page.")
+    });
+
+    let c = new("markdown-negotiation", Cat::Ai, "Markdown for AI agents", Sev::Low, E::Medium, &[ChatGPT, Claude, Perplexity],
+        "Optional and emerging: serving a clean markdown version when an agent asks for it (Accept: text/markdown, or a <link rel=alternate type=text/markdown>) saves agents from parsing your HTML.");
+    let md_link = cx.input.html.contains("type=\"text/markdown\"") || cx.input.html.contains("type='text/markdown'");
+    v.push(match &cx.input.markdown {
+        Some(m) if m.content_type.as_deref().map(|ct| ct.contains("markdown")).unwrap_or(false) => {
+            if m.vary.as_deref().map(|x| x.to_ascii_lowercase().contains("accept")).unwrap_or(false) {
+                c.pass("Serves text/markdown on request, with Vary: Accept.")
+            } else {
+                c.warn("Serves text/markdown on request but without Vary: Accept, so caches may hand markdown to browsers.", "Add Vary: Accept to responses that depend on the Accept header.")
+            }
+        }
+        _ if md_link => c.pass("A markdown alternate is linked from the page."),
+        Some(_) => c.info("No markdown version offered. Optional: low priority unless agents are a key audience."),
+        None => c.info("Not checked."),
+    });
+
+    let c = new("entity-graph", Cat::Structured, "Connected entity graph", Sev::Low, E::Low, &[Google, Gemini, ChatGPT, Perplexity],
+        "Knowledge graphs and LLMs resolve who you are from linked entities: @id references tying Organization, WebSite and pages together, sameAs links to official profiles (Wikipedia, Wikidata, LinkedIn, Crunchbase, GitHub), and knowsAbout topics.");
+    let e = &g.entity;
+    let mut missing = Vec::new();
+    if e.same_as.len() < 3 {
+        missing.push(format!("only {} sameAs profile link{}", e.same_as.len(), if e.same_as.len() == 1 { "" } else { "s" }));
+    }
+    if e.id_references == 0 && cx.schema.items.len() > 1 {
+        missing.push("no @id references between items".to_string());
+    }
+    if e.knows_about == 0 {
+        missing.push("no knowsAbout topics".to_string());
+    }
+    v.push(if cx.schema.items.is_empty() {
+        c.info("No structured data.")
+    } else if !e.has_entity {
+        c.info("No Organization or Person item to build on (see the Organization / brand entity check).")
+    } else if missing.is_empty() {
+        c.pass(format!("{} sameAs profiles, {} @id references, {} knowsAbout topics.", e.same_as.len(), e.id_references, e.knows_about))
+    } else {
+        c.warn(
+            format!("Thin entity graph: {}.", missing.join(", ")),
+            "Give your Organization an @id, reference it from WebSite and page items (\"publisher\": {\"@id\": …}), list 3+ official profiles in sameAs, and add knowsAbout topics.",
+        )
+        .code("json", "{\n  \"@context\": \"https://schema.org\",\n  \"@graph\": [\n    { \"@type\": \"Organization\", \"@id\": \"https://example.com/#org\", \"name\": \"Example\",\n      \"sameAs\": [\"https://www.linkedin.com/company/example\", \"https://www.wikidata.org/wiki/Q…\", \"https://github.com/example\"],\n      \"knowsAbout\": [\"Technical SEO\", \"Structured data\"] },\n    { \"@type\": \"WebSite\", \"url\": \"https://example.com/\", \"publisher\": { \"@id\": \"https://example.com/#org\" } }\n  ]\n}")
+    });
+
+    let c = new("soft-404", Cat::Indexability, "Missing pages return 404", Sev::High, E::Low, &[Google, Bing],
+        "If a URL that doesn't exist returns 200, search engines see endless duplicate 'soft 404' pages, waste crawl budget on them, and may drop real pages as duplicates.");
+    v.push(match &cx.input.soft404 {
+        None => c.info("Not checked."),
+        Some(pr) if pr.error.is_some() => c.info("Couldn't check: the probe request failed."),
+        Some(pr) => match pr.status {
+            Some(404) | Some(410) => c.pass(format!("A made-up URL returns {}.", pr.status.unwrap())),
+            Some(st) if st < 300 => c.fail(format!("A made-up URL ({}) returns {st}: missing pages look like real ones.", pr.url), "Return a 404 (or 410) status for unknown URLs, while still showing a helpful not-found page."),
+            Some(st) if st < 400 => c.warn(format!("A made-up URL redirects ({st}) instead of returning 404."), "Redirecting every unknown URL (often to the homepage) is treated as a soft 404. Return 404 for URLs that don't exist."),
+            Some(st) => c.pass(format!("A made-up URL returns {st}.")),
+            None => c.info("Couldn't check."),
+        },
+    });
+
+    let c = new("security-headers", Cat::Performance, "Security headers", Sev::Low, E::Low, &[Google, Bing],
+        "Security headers protect visitors and are part of the trust signals site audits score (claude-seo / geo-seo deduct for each one missing).");
+    let h = &cx.input.headers;
+    let csp = h.get("content-security-policy");
+    let framing = h.contains_key("x-frame-options") || csp.map(|x| x.contains("frame-ancestors")).unwrap_or(false);
+    let checks_: [(&str, bool); 4] = [
+        ("Content-Security-Policy", csp.is_some()),
+        ("X-Frame-Options or frame-ancestors", framing),
+        ("X-Content-Type-Options: nosniff", h.get("x-content-type-options").map(|x| x.to_ascii_lowercase().contains("nosniff")).unwrap_or(false)),
+        ("Referrer-Policy", h.contains_key("referrer-policy")),
+    ];
+    let missing: Vec<&str> = checks_.iter().filter(|(_, ok)| !ok).map(|(n, _)| *n).collect();
+    v.push(if cx.html_only {
+        c.info("Pasted HTML: no response headers.")
+    } else if missing.is_empty() {
+        c.pass("CSP, framing protection, nosniff and Referrer-Policy are set.")
+    } else {
+        c.warn(format!("Missing: {}.", missing.join(", ")), "Add them at your CDN or server. Start CSP in report-only mode if it's new to the site.")
+            .code("http", "Content-Security-Policy: default-src 'self'; frame-ancestors 'self'\nX-Content-Type-Options: nosniff\nReferrer-Policy: strict-origin-when-cross-origin\nPermissions-Policy: camera=(), microphone=(), geolocation=()")
+    });
 }
 
 // ------------------------------------------------------------ structured data
@@ -1303,8 +1457,20 @@ fn ai(cx: &Ctx, v: &mut Vec<Check>) {
     } else {
         "<!-- In your WebPage JSON-LD: -->\n\"dateModified\": \"2025-06-01\"\n<!-- And show it to readers: -->\n<time datetime=\"2025-06-01\">Updated June 1, 2025</time>"
     };
-    v.push(if p.modified.is_some() {
-        c.pass(signals.join(" · "))
+    let fr = &cx.geo.freshness;
+    let age = fr.age_days.map(|d| if d < 60 { format!("{d} days ago") } else { format!("{} months ago", d / 30) });
+    v.push(if let Some(y) = fr.title_year.filter(|_| p.modified.is_some()) {
+        c.warn(
+            format!("The title promises {y}, which reads as out of date. {}", signals.join(" · ")),
+            "Update the content and the year in the title together (and dateModified), or drop the year if the page isn't refreshed yearly.",
+        )
+    } else if p.modified.is_some() && matches!(fr.tier, "warning" | "stale") {
+        c.warn(
+            format!("Last updated {}: {}", age.unwrap_or_default(), signals.join(" · ")),
+            "Review and refresh the content, then update dateModified. Pages updated in the last 3 months are cited by AI answer engines far more often.",
+        )
+    } else if p.modified.is_some() {
+        c.pass(format!("{}{}", age.map(|a| format!("Updated {a}. ")).unwrap_or_default(), signals.join(" · ")))
     } else if !signals.is_empty() {
         c.warn(
             format!("Only weak signals: {}.", signals.join(" · ")),

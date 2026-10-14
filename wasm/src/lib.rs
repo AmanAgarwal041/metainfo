@@ -8,6 +8,7 @@ pub mod checks;
 pub mod crawlers;
 pub mod extract;
 pub mod generate;
+pub mod geo;
 pub mod keywords;
 pub mod llms;
 pub mod model;
@@ -123,6 +124,8 @@ pub fn analyze_input(input: &ScanInput) -> Report {
     };
     let schema = schema::validate(schema_html, Some(&schema::visible_text(schema_html)));
 
+    let mut geo = geo::analyze(schema_html, &page, &schema, url.as_ref().and_then(|u| u.host_str()), input.now_ms);
+
     let sugg = generate::Suggestions::new(&page, url.as_ref());
     let checks = checks::run(&checks::Ctx {
         input,
@@ -136,7 +139,19 @@ pub fn analyze_input(input: &ScanInput) -> Report {
         html_only,
         render: render.as_ref(),
         schema: &schema,
+        geo: &geo,
     });
+    // GEO technical access (20): AI crawlers allowed, content in the HTML, indexable.
+    let technical = {
+        let st = |id: &str| checks.iter().find(|c| c.id == id).map(|c| c.status);
+        let pts = |id: &str, w: u32| match st(id) {
+            Some(model::Status::Pass) | Some(model::Status::Info) => w,
+            Some(model::Status::Warn) => w / 2,
+            _ => 0,
+        };
+        pts("access-chatgpt", 4) + pts("access-perplexity", 4) + pts("access-claude", 3) + pts("access-google", 3) + pts("server-rendered", 4) + pts("noindex", 2)
+    };
+    geo::finish_score(&mut geo.score, technical);
 
     let scores = scoring::platform_scores(&checks);
     let categories = scoring::category_scores(&checks);
@@ -174,6 +189,7 @@ pub fn analyze_input(input: &ScanInput) -> Report {
         render,
         fetched_with: input.fetched_with.clone(),
         schema,
+        geo,
     }
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { diffSnapshots, type TrackedSite } from "@/lib/history";
+import { diffSnapshots, driftAlerts, type TrackedSite } from "@/lib/history";
 import { PLATFORM_META, type Platform, type Report } from "@/lib/types";
 import { PlatformChips, scoreColor, SeverityBadge } from "./ui";
 
@@ -24,6 +24,7 @@ export default function Overview({
   const snaps = site?.snapshots ?? [];
   const diff = snaps.length >= 2 ? diffSnapshots(snaps.at(-2), snaps.at(-1)!) : null;
   const delta = snaps.length >= 2 ? snaps.at(-1)!.overall - snaps.at(-2)!.overall : 0;
+  const drift = snaps.length >= 2 ? driftAlerts(snaps.at(-2), snaps.at(-1)!) : [];
   const blocked = report.crawlers.filter((c) => !c.allowed && c.purpose !== "training");
 
   return (
@@ -36,6 +37,15 @@ export default function Overview({
           {diff.regressed.length > 0 && (
             <span style={{ color: "var(--fail)" }}>Regressed: {few(diff.regressed.map(title))}.</span>
           )}
+        </div>
+      )}
+
+      {drift.length > 0 && (
+        <div className={drift.some((d) => d.severity === "critical") ? "error-box" : "notice"} style={{ marginTop: 0 }}>
+          <b>Changed since your last scan:</b>
+          <ul className="plain-list" style={{ marginTop: 4 }}>
+            {drift.map((d) => <li key={d.message}>{d.message}</li>)}
+          </ul>
         </div>
       )}
 

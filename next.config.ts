@@ -1,4 +1,10 @@
 import type { NextConfig } from "next";
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
+
+// Gives `next dev` the Worker's bindings (a local D1 under .wrangler/state) so
+// accounts and sync work locally. Apply schema changes with
+// `npx wrangler d1 migrations apply metainfo --local`.
+initOpenNextCloudflareForDev();
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,

@@ -35,6 +35,43 @@ export interface ScanInput {
   renderMs?: number | null;
   renderedUrl?: string | null;
   renderError?: string | null;
+  /** The host's clock, for content-age checks (the engine has none). */
+  nowMs?: number;
+  soft404?: Probe | null;
+  markdown?: Probe | null;
+}
+
+export interface Probe {
+  url: string;
+  status?: number | null;
+  contentType?: string | null;
+  vary?: string | null;
+  error?: string | null;
+}
+
+export interface Passage {
+  heading?: string | null;
+  excerpt: string;
+  words: number;
+  score: number;
+  answer: number;
+  selfContained: number;
+  readability: number;
+  stats: number;
+  originality: number;
+  contextDependent: boolean;
+  position: number;
+}
+
+export interface GeoReport {
+  citability: { score: number; grade: string; passages: number; coverage: number; top: Passage[]; bottom: Passage[]; contextDependent: number; bestPosition?: number | null };
+  answers: { questionHeadings: number; answered: number; unanswered: string[]; earlyDefinition: boolean };
+  evidence: { claims: number; cited: number; uncitedExamples: string[]; statsPer500: number; density: number };
+  phrasing: { filler: [string, number][]; aiPatterns: [string, number][]; fillerPer1k: number; aiPer1k: number; emDashes: number };
+  freshness: { date?: string | null; ageDays?: number | null; tier: "excellent" | "good" | "acceptable" | "warning" | "stale" | "unknown"; titleYear?: number | null; vagueTime: string[] };
+  trust: { about: boolean; contact: boolean; privacy: boolean; terms: boolean; editorial: boolean; authorProfile: boolean };
+  entity: { hasEntity: boolean; idReferences: number; sameAs: string[]; knowsAbout: number; speakable: boolean; searchAction: boolean };
+  score: { total: number; citability: number; structure: number; multimodal: number; authority: number; technical: number };
 }
 
 export interface Check {
@@ -231,6 +268,8 @@ export interface Report {
   fetchedWith?: string | null;
   /** schema.org validation (absent on reports saved before the validator existed). */
   schema?: SchemaReport;
+  /** AI-citation readiness (absent on older saved reports). */
+  geo?: GeoReport;
 }
 
 export interface SchemaIssue {

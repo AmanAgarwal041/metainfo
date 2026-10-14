@@ -27,6 +27,7 @@ import {
   IconTrend,
   IconUsers,
 } from "./icons";
+import AccountMenu, { useWorkspaceSync } from "./AccountMenu";
 import { Logo } from "./Logo";
 
 type Item = { href: string; label: string; icon: (p: { size?: number }) => ReactNode };
@@ -257,7 +258,9 @@ export default function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const [menu, setMenu] = useState(false);
   const [palette, setPalette] = useState(false);
-  const current = ALL.find((i) => i.href === path)?.label ?? (path === "/settings" ? "Settings" : "");
+  const current = ALL.find((i) => i.href === path)?.label ?? ({ "/settings": "Settings", "/organisation": "Organisation", "/login": "Sign in" } as Record<string, string>)[path] ?? "";
+  // Remount the page when synced data from the account replaces what it read from storage.
+  const syncGeneration = useWorkspaceSync();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -285,8 +288,11 @@ export default function Shell({ children }: { children: ReactNode }) {
             <span className="cmdk-text">Search or jump to</span>
             <kbd>⌘K</kbd>
           </button>
+          <AccountMenu />
         </header>
-        {children}
+        <div key={syncGeneration} style={{ display: "contents" }}>
+          {children}
+        </div>
       </div>
       {palette && <CommandPalette onClose={() => setPalette(false)} />}
     </div>

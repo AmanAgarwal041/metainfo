@@ -6,6 +6,7 @@
 // answer (URLs masked); "cited" = a source URL is on the brand's domain.
 
 import type { AiAnswer, AiEngine } from "@/lib/research-types";
+import { setLocal } from "@/lib/store";
 
 export interface Match {
   mentioned: boolean;
@@ -67,7 +68,7 @@ export function loadRuns(projectId: string): AiRun[] {
 export function saveRun(projectId: string, run: AiRun): AiRun[] {
   const runs = [...loadRuns(projectId), run].slice(-MAX_RUNS);
   try {
-    localStorage.setItem(KEY(projectId), JSON.stringify(runs));
+    setLocal(KEY(projectId), JSON.stringify(runs));
   } catch {
     /* storage full: keep in memory for this view */
   }

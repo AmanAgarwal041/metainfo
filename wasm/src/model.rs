@@ -32,6 +32,22 @@ pub struct ScanInput {
     pub rendered_url: Option<String>,
     /// How the page HTML was obtained when a plain fetch was refused (e.g. "browser").
     pub fetched_with: Option<String>,
+    /// The host's clock (ms since epoch), for content-age checks; WASM has no clock of its own.
+    pub now_ms: Option<f64>,
+    /// A request for a path that can't exist on the site: a 200 means soft 404s.
+    pub soft404: Option<Probe>,
+    /// The page requested with `Accept: text/markdown`.
+    pub markdown: Option<Probe>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Probe {
+    pub url: String,
+    pub status: Option<u16>,
+    pub content_type: Option<String>,
+    pub vary: Option<String>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -293,4 +309,6 @@ pub struct Report {
     pub fetched_with: Option<String>,
     /// schema.org / rich-result validation of the page's structured data.
     pub schema: crate::schema::SchemaReport,
+    /// AI-citation readiness: passage citability, answers, evidence, freshness, trust, entity graph.
+    pub geo: crate::geo::GeoReport,
 }

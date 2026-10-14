@@ -11,6 +11,7 @@
 import { robotsAllows, runEngine } from "@/lib/engine";
 import { flattenIssues } from "@/lib/schema-utils";
 import type { Report, Severity } from "@/lib/types";
+import { setLocal } from "@/lib/store";
 
 export interface CrawlPage {
   url: string;
@@ -429,7 +430,7 @@ export function loadCrawlHistory(projectId: string): CrawlSnapshot[] {
 export function saveCrawl(projectId: string, s: SiteSummary): CrawlSnapshot[] {
   const list = [...loadCrawlHistory(projectId), { at: s.crawledAt, start: s.start, pages: s.htmlPages, avgScore: s.avgScore, broken: s.broken, findings: s.findings.length }].slice(-30);
   try {
-    localStorage.setItem(KEY(projectId), JSON.stringify(list));
+    setLocal(KEY(projectId), JSON.stringify(list));
   } catch {
     /* storage full */
   }

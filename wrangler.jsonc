@@ -16,6 +16,17 @@
       "service": "metainfo"
     }
   ],
+  // Accounts, organisations and synced workspaces (sign-in is optional).
+  // Apply migrations with: npx wrangler d1 migrations apply metainfo --remote
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "metainfo",
+      "database_id": "b9def348-04b9-4d91-b6ff-5b75f1bb0704",
+      "migrations_dir": "migrations"
+    }
+  ],
   "observability": { "enabled": true }
   // Secrets (optional): wrangler secret put DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD / RESEARCH_TOKEN
+  // Sign-in: APP_URL, AUTH_SECRET, and GOOGLE_AUTH_CLIENT_ID/SECRET and/or GITHUB_AUTH_CLIENT_ID/SECRET
 }
