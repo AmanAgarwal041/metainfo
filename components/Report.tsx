@@ -18,7 +18,15 @@ import Previews from "./Previews";
 import Tags from "./Tags";
 import { download, ScoreRing } from "./ui";
 
-export type TabId = "overview" | "issues" | "plan" | "crawlers" | "geo" | "rendering" | "schema" | "tags" | "previews" | "generated" | "history";
+const TAB_IDS = ["overview", "issues", "plan", "crawlers", "geo", "rendering", "schema", "tags", "previews", "generated", "history"] as const;
+export type TabId = (typeof TAB_IDS)[number];
+
+/** `?tab=plan` deep-links to a tab. The report only renders in the browser, after a scan. */
+function tabFromUrl(): TabId {
+  if (typeof window === "undefined") return "overview";
+  const t = new URLSearchParams(window.location.search).get("tab");
+  return (TAB_IDS as readonly string[]).includes(t ?? "") ? (t as TabId) : "overview";
+}
 
 export default function Report({
   report,
@@ -35,7 +43,14 @@ export default function Report({
   onNewScan: () => void;
   onSiteChange: (s: TrackedSite) => void;
 }) {
-  const [tab, setTab] = useState<TabId>("overview");
+  const [tab, setTabState] = useState<TabId>(tabFromUrl);
+  const setTab = (t: TabId) => {
+    setTabState(t);
+    const q = new URL(window.location.href);
+    if (t === "overview") q.searchParams.delete("tab");
+    else q.searchParams.set("tab", t);
+    window.history.replaceState(null, "", q);
+  };
   const status = useResearchStatus();
   const [platformFilter, setPlatformFilter] = useState<Platform | "all">("all");
   const issues = report.checks.filter((c) => c.status === "fail" || c.status === "warn").length;

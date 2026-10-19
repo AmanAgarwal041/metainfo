@@ -9,7 +9,7 @@ import { PageHead } from "./kit";
 /** Sign-in is optional; this page says what it adds and what stays free. */
 export default function Login() {
   const account = useAccount();
-  const [returnTo, setReturnTo] = useState("/");
+  const [returnTo, setReturnTo] = useState("/dashboard");
 
   useEffect(() => {
     const r = new URL(window.location.href).searchParams.get("returnTo");

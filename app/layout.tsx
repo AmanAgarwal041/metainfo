@@ -33,7 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         {/* Sign-in is optional: without a Clerk key the app runs anonymous-only. */}
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? (
-          <ClerkProvider afterSignOutUrl="/">
+          <ClerkProvider afterSignOutUrl="/dashboard">
             <ClerkAccounts>
               <Shell>{children}</Shell>
             </ClerkAccounts>

@@ -132,7 +132,7 @@ function ClerkAccountMenu({ account }: { account: Account }) {
       await clerk.signOut();
       // A full load on purpose: every page still holds the cleared workspace in memory.
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.href = "/";
+      window.location.href = "/dashboard";
     } finally {
       setBusy(false);
     }

@@ -1,10 +1,102 @@
-# MetaInfo
+<p align="center">
+  <img src="app/icon.svg" width="64" height="64" alt="MetaInfo logo">
+</p>
 
-Scan any page the way **Google, Bing, ChatGPT, Perplexity, Claude and Gemini** see it. MetaInfo finds missing tags, crawler
-blocks, and sitemap, robots.txt and llms.txt problems, checks the page against Google's guidelines and AI-readiness rules,
-generates the fixes, and tracks your scores over time.
+<h1 align="center">MetaInfo</h1>
+
+<p align="center">
+  <b>See your page the way Google, Bing, ChatGPT, Perplexity, Claude and Gemini see it, then fix what they can't read.</b>
+</p>
+
+<p align="center">
+  <a href="https://metainfo.agarwal-aman041.workers.dev"><img alt="Live: metainfo.agarwal-aman041.workers.dev" src="https://img.shields.io/badge/live-metainfo.agarwal--aman041.workers.dev-3555d8?style=flat-square"></a>
+  <img alt="No sign-up needed" src="https://img.shields.io/badge/sign--up-not%20needed-2f9e5b?style=flat-square">
+  <img alt="Rust and WebAssembly engine" src="https://img.shields.io/badge/engine-Rust%20%2B%20WASM-b7410e?style=flat-square">
+  <img alt="Runs on Cloudflare Workers" src="https://img.shields.io/badge/runs%20on-Cloudflare%20Workers-f38020?style=flat-square">
+</p>
+
+<p align="center">
+  <a href="https://metainfo.agarwal-aman041.workers.dev/audit"><b>Audit a page</b></a> ·
+  <a href="https://metainfo.agarwal-aman041.workers.dev/dashboard">Open the dashboard</a> ·
+  <a href="#use-it-from-ci--mcp">CI and MCP</a> ·
+  <a href="#develop">Run it yourself</a>
+</p>
+
+![A MetaInfo page audit of vercel.com: an overall score of 92, separate scores for Google, Bing, ChatGPT, Perplexity, Claude, Gemini and social sharing, category scores and the top fixes](public/landing/audit-overview.jpg)
+
+MetaInfo is an open-source SEO and AI-visibility workbench. Paste a URL and a Rust engine, compiled to WebAssembly and running in
+your browser, scores the page for each search and AI platform, checks which crawlers can actually reach it, validates its structured
+data, and turns every failing check into a ranked fix plan. Research, rank tracking and AI-answer monitoring sit alongside, and the
+whole thing is usable from CI and from any MCP client. **Every tool works without an account**; signing in is optional and only
+syncs your workspace.
 
 ## What it does
+
+**Optimise** (free, in your browser)
+
+* **Page audit.** 55+ checks, scored 0–100 separately for Google, Bing, ChatGPT, Perplexity, Claude, Gemini/AI Overviews and social sharing, and per category (crawling, meta, social, content, structured data, AI readiness, performance and security).
+* **Fix plan.** Failing checks grouped into Blockers, Quick wins, Foundations and Polish, ranked by score gain per unit of effort, with projected scores, per-task status and Markdown export.
+* **AI & crawlers.** An access matrix for 14 crawlers (Googlebot, Bingbot, OAI-SearchBot, GPTBot, Claude-SearchBot, ClaudeBot, PerplexityBot, …): the robots.txt verdict for the exact URL plus a live request with each user agent, which catches CDN and WAF blocks.
+* **AI citation readiness (GEO).** A GEO score, passage citability per section, answer-first structure, sourced claims, phrasing and freshness. Deterministic, no LLM involved.
+* **JS rendering.** What only appears after JavaScript runs: hidden words, rewritten meta tags, JS-only links and JSON-LD. Measured when the optional Scrapling service is configured; a heuristic otherwise.
+* **Schema validator.** JSON-LD, Microdata and RDFa against the full schema.org vocabulary, Google rich-result requirements, and a check that the markup matches the visible page.
+* **Previews.** Editable Google result, AI-answer citation, Facebook, X, LinkedIn and Slack cards.
+* **Generated files.** A complete `<head>`, a JSON-LD `@graph`, a recommended robots.txt and a draft llms.txt, built from the page's own content.
+* **Site crawl.** Crawl a whole site and get broken links, duplicate titles, thin, deep and weakly linked pages, sitemap coverage and "fix it once in your template" issues.
+
+**Research** (free starting points; most of it needs [DataForSEO](#connecting-dataforseo) credentials)
+
+* **Keywords:** free long-tail ideas from Google Autocomplete; volume, difficulty, CPC, intent and trend with DataForSEO.
+* **Keyword gap:** a free content gap from competitors' pages; the ranking gap with DataForSEO.
+* **Competitors:** a free side-by-side audit comparison; organic competitors by keyword overlap with DataForSEO.
+* **SERP analysis:** a free benchmark of the pages you paste; live results, SERP features and AI Overview sources with DataForSEO.
+* **Backlinks:** DataForSEO only.
+
+**Track**
+
+* **Dashboard:** per-platform scores over time, AI search readiness, next fixes and a setup checklist per project.
+* **Rank tracking** and **AI visibility** (does ChatGPT, Claude, Gemini or Perplexity mention or cite you?): DataForSEO only, with a cost estimate before each run.
+
+**Integrate**
+
+* **MCP server** at `/api/mcp` and a **CI-friendly `/api/report`** (below).
+* **Optional accounts with team workspaces** (Clerk): sync projects and history across devices and share them with a team.
+
+## Screenshots
+
+| | |
+| --- | --- |
+| ![Crawler access matrix: robots.txt verdict and live HTTP status for each search, AI-search and training crawler](public/landing/ai-crawlers.jpg) | ![Fix plan: tasks grouped into blockers and quick wins, with projected score gains per platform](public/landing/fix-plan.jpg) |
+| **AI & crawlers:** which bots can really read the page | **Fix plan:** ranked tasks with projected scores |
+| ![AI citations tab for a Wikipedia article: GEO score 67, passage citability C 55, score breakdown and the most quotable sections](public/landing/ai-citations.jpg) | ![Schema validator on a recipe page: one JSON-LD item, no errors, eligible for Article and Recipe rich results](public/landing/schema-validator.jpg) |
+| **AI citations:** passage-level citability and GEO score | **Schema validator:** schema.org plus Google rich results |
+| ![Previews of a Google result, an AI answer citation and a Facebook card for github.com](public/landing/previews.jpg) | ![Generated head tags for vercel.com, ready to copy or download](public/landing/generated-files.jpg) |
+| **Previews:** search, AI and social cards | **Generated files:** head tags, JSON-LD, robots.txt, llms.txt |
+| ![Project dashboard: audit score 92, AI search readiness 92, score over time, setup checklist and next fixes](public/landing/dashboard.jpg) | |
+| **Dashboard:** one project at a glance | |
+
+## Use it from CI / MCP
+
+`/api/report` runs the same engine on the server. With `format=summary` it returns a compact score card, and with `min` it answers
+HTTP 422 when the overall score is below the threshold, so `curl -f` fails the pipeline:
+
+```bash
+curl -f "https://metainfo.agarwal-aman041.workers.dev/api/report?url=example.com/pricing&format=summary&min=80"
+```
+
+The MCP server speaks Streamable HTTP. `audit_page`, `validate_schema` and `keyword_ideas` are free; the research tools appear once
+DataForSEO is configured ([details](#mcp-server)).
+
+```bash
+claude mcp add --transport http metainfo https://metainfo.agarwal-aman041.workers.dev/api/mcp
+```
+
+## Part of a product family
+
+* [**ProductRoot**](https://productroot.agarwal-aman041.workers.dev): a launch readiness planner.
+* [**SocialBrewery**](https://socialbrewery.agarwal-aman041.workers.dev): an AI posting studio for YouTube Shorts, LinkedIn, Instagram, X, Hashnode, Slack and Reddit.
+
+## Audit in detail
 
 | Area | Details |
 | --- | --- |
@@ -65,7 +157,8 @@ RESEARCH_TOKEN=some-secret                # strongly recommended when deployed
 ## Workspace
 
 * **Projects:** each holds a domain, brand name, up to 5 competitors, a market, tracked keywords and AI prompts. The sidebar switcher scopes every page to the active project.
-* **Dashboard (`/`):** audit score and trend per platform, AI search readiness, average position and its distribution, AI answer mention rate, next fixes, and a setup checklist.
+* **Landing (`/`):** a public overview of the product. Old `/?url=` links still redirect to the audit.
+* **Dashboard (`/dashboard`):** audit score and trend per platform, AI search readiness, average position and its distribution, AI answer mention rate, next fixes, and a setup checklist.
 * **Rank tracking (`/rankings`):** desktop or mobile positions for the project's keywords and competitors, plus whether an AI Overview cites you.
   * Before each run it shows a cost estimate and asks you to confirm.
   * Results include movement, a position distribution, per-keyword history charts and a "by date" matrix for reports.
@@ -74,6 +167,7 @@ RESEARCH_TOKEN=some-secret                # strongly recommended when deployed
   * Results show mention and citation rates, competitor gaps, cited sources, the full answer with your brand highlighted, and a trend across runs.
   * The free part is AI readiness from your latest audit.
 * **Settings (`/settings`):** projects, data source status, MCP connection snippets, theme, and backup export, import and reset.
+* **Audit tabs** can be linked directly: `/audit?url=example.com&tab=plan` (also `crawlers`, `geo`, `rendering`, `schema`, `tags`, `previews`, `generated`, `history`, `issues`).
 * **Command palette (⌘K):** jump to any page, audit a URL, research a keyword, check a SERP, switch or create projects, change theme.
 
 ## MCP server
@@ -244,8 +338,11 @@ browser: Rust → WASM engine (wasm/) ── parse · 55+ checks · scoring · p
 * **`app/api/report`**: runs the same WASM engine server-side, for CI and cron tracking.
 * **`app/api/research/*`**: keyword, gap, competitor, SERP and backlink endpoints (`lib/server/dataforseo.ts`,
   `lib/server/autocomplete.ts`). They normalise provider data into `lib/research-types.ts`.
-* **`components/`, `lib/`**: the UI. Audit history, rank history and the project (site, competitors, market) live in
-  `localStorage` (`lib/history.ts`, `lib/rank-history.ts`, `lib/project.ts`).
+* **`app/api/session`, `app/api/workspace`**: optional accounts. Clerk session tokens are verified with `@clerk/backend`
+  (`lib/server/auth/`) and workspaces are stored in D1 (`migrations/`).
+* **`components/`, `lib/`**: the UI. `components/Landing.tsx` is the public page at `/`, rendered outside the app shell
+  (`components/Shell.tsx`). Audit history, rank history and the project (site, competitors, market) live in `localStorage`
+  (`lib/history.ts`, `lib/rank-history.ts`, `lib/project.ts`), and sync to the signed-in workspace when there is one (`lib/sync.ts`).
 
 ## Develop
 
@@ -283,7 +380,10 @@ npx wrangler secret put RESEARCH_TOKEN
 * OpenNext copies local `.env*` values into the Worker bundle; `scripts/cf-sanitize-env.mjs` (part of `npm run cf:build`) strips
   everything except `NEXT_PUBLIC_*`, so credentials from a local `.env` never ship. Use `wrangler secret put` for production keys.
 * The Worker is about 1.8 MB gzipped, under the 3 MB Workers Free limit.
-* Browser history (projects, audits, rank checks, AI runs) is still per browser, as with the Node deployment.
+* Browser history (projects, audits, rank checks, AI runs) stays per browser unless the user signs in.
+* Sign-in turns on only when the build has `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and the Worker has `CLERK_SECRET_KEY` and the D1
+  binding, with the migrations applied (see [Accounts and teams](#accounts-and-teams-optional)). Without them the deploy is
+  anonymous-only.
 
 ## API (CI / scheduled tracking)
 

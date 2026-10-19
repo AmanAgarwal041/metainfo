@@ -33,7 +33,7 @@ import { Logo } from "./Logo";
 type Item = { href: string; label: string; icon: (p: { size?: number }) => ReactNode };
 
 const NAV: { label?: string; items: Item[] }[] = [
-  { items: [{ href: "/", label: "Dashboard", icon: IconDashboard }] },
+  { items: [{ href: "/dashboard", label: "Dashboard", icon: IconDashboard }] },
   {
     label: "Optimise",
     items: [
@@ -118,7 +118,7 @@ function Sidebar({ open, onNavigate }: { open: boolean; onNavigate: () => void }
   }, []);
   return (
     <aside className="sidebar" data-open={open} aria-label="Main navigation">
-      <Link href="/" className="sb-brand" onClick={onNavigate}>
+      <Link href="/dashboard" className="sb-brand" onClick={onNavigate}>
         <Logo />
       </Link>
       <ProjectSwitch />
@@ -272,6 +272,9 @@ export default function Shell({ children }: { children: ReactNode }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // The landing page is a standalone marketing page, outside the app shell.
+  if (path === "/") return <>{children}</>;
 
   return (
     <div className="app">
