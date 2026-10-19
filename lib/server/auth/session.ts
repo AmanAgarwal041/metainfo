@@ -1,35 +1,35 @@
-// Request-level helpers: who is signed in, in which organisation, with what role.
+// Request-level helpers: who is signed in, which workspace they're in, with what role.
 
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/server/db";
-import { AuthError, membershipsFor, roleAtLeast, SESSION_COOKIE, SESSION_DAYS, sessionUser, setSessionOrg, type OrgSummary, type Role, type User } from "./accounts";
+import { AuthError, roleAtLeast, workspaceFor, type Role } from "./accounts";
+import { clerkAuth } from "./clerk";
 
 export interface Signed {
   db: D1Database;
-  hash: string;
-  user: User;
-  orgs: OrgSummary[];
-  org: OrgSummary | null;
+  userId: string;
+  /** What the client calls the workspace: the active Clerk organisation id, or the user id for a personal workspace. */
+  scope: string;
+  personal: boolean;
+  role: Role;
+  /** The D1 `orgs` row the workspace is stored under. */
+  orgId: string;
 }
 
-/** The signed-in user and their active organisation, or null (anonymous, or no database). */
-export async function currentSession(): Promise<Signed | null> {
+/** The signed-in user and their active workspace, or null (anonymous, or no database). */
+export async function currentSession(req: Request): Promise<Signed | null> {
   const db = await getDb();
   if (!db) return null;
-  const s = await sessionUser(db, (await cookies()).get(SESSION_COOKIE)?.value);
-  if (!s) return null;
-  const orgs = await membershipsFor(db, s.user.id);
-  let org = orgs.find((o) => o.id === s.orgId) ?? null;
-  // The active org was deleted or the user was removed from it: fall back to their first one.
-  if (!org && orgs.length) {
-    org = orgs[0];
-    await setSessionOrg(db, s.hash, org.id);
-  }
-  return { db, hash: s.hash, user: s.user, orgs, org };
+  const auth = await clerkAuth(req);
+  if (!auth) return null;
+  const personal = !auth.orgId;
+  const scope = auth.orgId ?? auth.userId;
+  // Your personal workspace is yours alone.
+  const role: Role = personal ? "owner" : (auth.orgRole ?? "member");
+  return { db, userId: auth.userId, scope, personal, role, orgId: await workspaceFor(db, scope, auth.userId, role) };
 }
 
-/** Refuse cross-site state-changing requests (cookies are SameSite=Lax; this is defence in depth). */
+/** Refuse cross-site state-changing requests (defence in depth: the Clerk token normally comes in a header). */
 export function assertSameOrigin(req: Request) {
   if (req.method === "GET" || req.method === "HEAD") return;
   const site = req.headers.get("sec-fetch-site");
@@ -38,25 +38,13 @@ export function assertSameOrigin(req: Request) {
   if (origin && origin !== new URL(req.url).origin && origin !== process.env.APP_URL?.replace(/\/+$/, "")) throw new AuthError("Cross-site request refused.", 403);
 }
 
-/** Signed in with an active organisation, at least `role`. */
-export async function requireOrg(req: Request, role: Role = "member"): Promise<Signed & { org: OrgSummary }> {
+/** Signed in, at least `role` in the active workspace. */
+export async function requireWorkspace(req: Request, role: Role = "member"): Promise<Signed> {
   assertSameOrigin(req);
-  const s = await currentSession();
+  const s = await currentSession(req);
   if (!s) throw new AuthError("Sign in to continue.", 401);
-  if (!s.org) throw new AuthError("Choose an organisation first.", 409);
-  if (!roleAtLeast(s.org.role, role)) throw new AuthError(`Only ${role === "owner" ? "owners" : "admins"} can do that.`, 403);
-  return s as Signed & { org: OrgSummary };
-}
-
-export function sessionCookie(res: NextResponse, req: Request, token: string | null) {
-  res.cookies.set(SESSION_COOKIE, token ?? "", {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: new URL(process.env.APP_URL || req.url).protocol === "https:",
-    path: "/",
-    maxAge: token ? SESSION_DAYS * 86_400 : 0,
-  });
-  return res;
+  if (!roleAtLeast(s.role, role)) throw new AuthError(`Only ${role === "owner" ? "owners" : "admins"} can do that.`, 403);
+  return s;
 }
 
 /** JSON error responses for AuthError (and a 500 for anything unexpected). */

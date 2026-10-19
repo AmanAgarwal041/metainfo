@@ -1,17 +1,20 @@
 "use client";
 
 // Keeps this browser's workspace (projects, scan history, rank tracking,
-// crawls, AI-visibility runs) in step with the signed-in organisation.
+// crawls, AI-visibility runs) in step with the signed-in workspace: the active
+// Clerk organisation, or the user's personal workspace. "orgId" below is that
+// workspace's id (a Clerk organisation id, or the Clerk user id).
 //
 // - Anonymous: nothing happens; data stays in localStorage.
 // - First sign-in from a browser: its local work is merged into the account
 //   ("save your progress"), so nothing done before signing in is lost.
-// - Switching organisation (or account): the local copy is replaced by that
-//   organisation's workspace; the previous one was already pushed.
+// - Switching workspace (or account): the local copy is replaced by that
+//   workspace; the previous one was already pushed.
 // - Afterwards: writes are pushed shortly after they happen, with per-key
 //   versions; if another device changed the same key, the two copies are
 //   merged and pushed again.
 
+import { getToken } from "@clerk/nextjs";
 import { isSyncedKey } from "@/lib/workspace-keys";
 import { mergeValues } from "@/lib/merge";
 import { LOCAL_WRITE } from "@/lib/store";
@@ -65,9 +68,11 @@ const localKeys = () => Object.keys(localStorage).filter(isSyncedKey);
 const isDeleted = (v: string | null | undefined) => v == null || v === "null";
 
 async function request<T>(method: string, body?: unknown): Promise<T> {
+  // Clerk's session token for the active workspace (Clerk refreshes it as it nears expiry).
+  const token = await getToken().catch(() => null);
   const res = await fetch("/api/workspace", {
     method,
-    headers: body ? { "content-type": "application/json" } : undefined,
+    headers: { ...(body ? { "content-type": "application/json" } : {}), ...(token ? { authorization: `Bearer ${token}` } : {}) },
     body: body ? JSON.stringify(body) : undefined,
     cache: "no-store",
   });
@@ -80,7 +85,7 @@ let session: { orgId: string; userId: string } | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let running: Promise<void> | null = null;
 
-/** Pull the organisation's workspace into this browser. Returns whether anything local changed. */
+/** Pull the workspace into this browser. Returns whether anything local changed. */
 async function pull(): Promise<boolean> {
   if (!session) return false;
   const { orgId, entries } = await request<{ orgId: string; entries: Record<string, Entry> }>("GET");
@@ -112,7 +117,7 @@ async function pull(): Promise<boolean> {
         else if (l != null) dirty.add(k);
       }
     } else {
-      // Another organisation or account: show its workspace instead.
+      // Another workspace or account: show it instead.
       for (const k of localKeys()) if (!entries[k] || isDeleted(entries[k].value)) set(k, null);
       for (const [k, r] of Object.entries(entries)) {
         versions[k] = r.version;
@@ -184,8 +189,6 @@ function run(kind: "full" | "push"): Promise<void> {
       if (pulled || merged) window.dispatchEvent(new Event(WORKSPACE_REPLACED));
       setStatus({ state: "synced", at: Date.now() });
     } catch (e) {
-      const code = (e as { status?: number }).status;
-      if (code === 409 || code === 401) window.dispatchEvent(new Event("metainfo:account-stale"));
       setStatus(navigator.onLine === false ? { state: "offline" } : { state: "error", message: e instanceof Error ? e.message : String(e) });
     }
   };
@@ -208,7 +211,7 @@ function onFocus() {
   if (session && Date.now() - (st.lastSync ?? 0) > 30_000) void run("full");
 }
 
-/** Start syncing for a signed-in member of `orgId` (idempotent). */
+/** Start syncing workspace `orgId` for a signed-in user (idempotent). */
 export function startSync(orgId: string, userId: string): Promise<void> {
   const same = session?.orgId === orgId && session.userId === userId;
   session = { orgId, userId };
@@ -228,7 +231,7 @@ export function stopSync() {
   setStatus({ state: "idle" });
 }
 
-/** Push anything pending (before switching organisation or signing out). */
+/** Push anything pending (before switching workspace or signing out). */
 export async function flushSync() {
   if (timer) clearTimeout(timer);
   await run("push");

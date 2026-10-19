@@ -192,23 +192,27 @@ When the Scrapling service is configured, URLs are validated as rendered, which 
 
 ## Accounts and teams (optional)
 
-Every tool works without signing in. Signing in saves your workspace to an account, syncs it across devices, and shares it with a team. The workspace is your projects, scan history and tracking, rank checks, crawls and AI-visibility runs. The design follows socialbrewery's auth:
+Every tool works without signing in. Signing in saves your workspace to an account, syncs it across devices, and shares it with a team. The workspace is your projects, scan history and tracking, rank checks, crawls and AI-visibility runs. Sign-in, people and organisations run on [Clerk](https://clerk.com), as in socialbrewery:
 
-* **Sign-in.** Google (OIDC with PKCE) or GitHub OAuth, with no passwords. Accounts with the same verified email are merged. The first sign-in creates an organisation.
-* **Sessions.** A random token in an HttpOnly, SameSite=Lax cookie (`mi_session`, 30 days). Only its SHA-256 hash is stored. State-changing requests must come from the same origin.
-* **Organisations.** Roles are owner, admin and member. Admins invite people with a link, which only the invited email can accept and which expires after 14 days. Every organisation keeps at least one owner. You can belong to several organisations and switch between them from the account menu.
-* **Saving progress.** On first sign-in, work done anonymously in that browser is merged into the account. After that, changes sync a moment after they happen. Each item carries a version number, so concurrent edits on two devices are merged instead of overwritten. Switching organisation swaps in that organisation's workspace. Signing out clears the browser copy.
+* **Sign-in.** Clerk's sign-in and sign-up, with whichever methods you turn on in the Clerk dashboard (Google, GitHub, email, passkeys, …).
+* **Sessions.** Clerk's short-lived session token, sent as a Bearer header (or Clerk's `__session` cookie). Route handlers verify it with `@clerk/backend`, including the authorised origin. State-changing requests must also come from the same origin.
+* **Workspaces.** Signing in opens your **personal** workspace. **Organisations** are Clerk organisations: admins invite people, change roles and rename it from **Members and invites** (Clerk's organisation profile); members use and edit the shared workspace. Switch between your personal workspace and organisations from the account menu.
+* **Saving progress.** On first sign-in, work done anonymously in that browser is merged into the account. After that, changes sync a moment after they happen. Each item carries a version number, so concurrent edits on two devices are merged instead of overwritten. Switching workspace swaps in that workspace. Signing out clears the browser copy.
 * **Never uploaded:** DataForSEO keys, the research token and the theme.
 
 Storage is Cloudflare D1 (`migrations/`). To set it up:
 
+1. Create an application at [dashboard.clerk.com](https://dashboard.clerk.com), pick the sign-in methods, and turn on **Organizations** with **Membership optional** (personal workspaces depend on it). On the production instance, add your domain.
+2. Apply the migrations and add the keys:
+
 ```bash
 npx wrangler d1 migrations apply metainfo --remote      # --local for next dev
-npx wrangler secret put APP_URL                          # e.g. https://metainfo.example.com
-npx wrangler secret put GOOGLE_AUTH_CLIENT_ID            # and _SECRET; and/or GITHUB_AUTH_CLIENT_ID/_SECRET
+npx wrangler secret put CLERK_SECRET_KEY                 # sk_live_…
 ```
 
-OAuth callback URLs are `${APP_URL}/auth/google/callback` and `${APP_URL}/auth/github/callback`. For local development, `AUTH_DEV_LOGIN=1 npm run dev` adds a test sign-in, which is ignored in production. With no provider configured, the sign-in button doesn't appear.
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` (`pk_…`) is read at build time, so put it in `.env` (or the build environment) before `npm run deploy`. For `next dev`, put both keys in `.env.local`. Without the publishable key, or without the database, the sign-in button doesn't appear and everything stays in the browser.
+
+Workspaces saved with the sign-in MetaInfo had before Clerk carry over: the first workspace one of their owners opens after signing in with Clerk under the same verified email (their personal one, or an organisation they're an admin of) takes over the oldest one they owned.
 
 ## AI citation readiness (GEO)
 

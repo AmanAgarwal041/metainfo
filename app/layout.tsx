@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Hanken_Grotesk, JetBrains_Mono } from "next/font/google";
+import { ClerkProvider } from "@clerk/nextjs";
 import Shell from "@/components/Shell";
+import { ClerkAccounts, NoAccounts } from "@/lib/account";
 import { THEME_BOOT } from "@/lib/theme";
 import "./globals.css";
 
@@ -29,7 +31,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
       </head>
       <body>
-        <Shell>{children}</Shell>
+        {/* Sign-in is optional: without a Clerk key the app runs anonymous-only. */}
+        {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? (
+          <ClerkProvider afterSignOutUrl="/">
+            <ClerkAccounts>
+              <Shell>{children}</Shell>
+            </ClerkAccounts>
+          </ClerkProvider>
+        ) : (
+          <NoAccounts>
+            <Shell>{children}</Shell>
+          </NoAccounts>
+        )}
       </body>
     </html>
   );

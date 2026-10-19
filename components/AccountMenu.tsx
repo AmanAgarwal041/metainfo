@@ -1,30 +1,30 @@
 "use client";
 
-// Top-bar account control. Anonymous: a quiet "Sign in to save" (only when a
-// sign-in method is configured). Signed in: avatar menu with the organisation
-// switcher, sync status and sign-out.
+// Top-bar account control. Anonymous: a quiet "Sign in to save" (only when
+// sign-in is set up). Signed in: avatar menu with the workspace switcher
+// (personal, plus Clerk organisations), sync status and sign-out.
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { api, loadAccount, useAccount, type Account } from "@/lib/account";
+import { useClerk } from "@clerk/nextjs";
+import { useAccount, type Account } from "@/lib/account";
 import { clearLocalWorkspace, flushSync, startSync, stopSync, SYNC_STATUS, syncStatus, WORKSPACE_REPLACED, type SyncStatus } from "@/lib/sync";
 
 /** Starts/stops workspace sync with the account; returns a counter that changes when synced data replaced local data. */
 export function useWorkspaceSync(): number {
   const account = useAccount();
   const [gen, setGen] = useState(0);
-  const orgId = account?.authenticated ? account.org?.id : undefined;
-  const userId = account?.user?.id;
+  const workspaceId = account.authenticated ? account.workspace?.id : undefined;
+  const userId = account.user?.id;
+  const loaded = account.loaded;
   useEffect(() => {
-    if (orgId && userId) void startSync(orgId, userId);
-    else if (account) stopSync();
-  }, [orgId, userId, account]);
+    if (workspaceId && userId) void startSync(workspaceId, userId);
+    else if (loaded) stopSync();
+  }, [workspaceId, userId, loaded]);
   useEffect(() => {
     const bump = () => setGen((g) => g + 1);
-    const stale = () => void loadAccount(true);
     window.addEventListener(WORKSPACE_REPLACED, bump);
-    window.addEventListener("metainfo:account-stale", stale);
     // Drop the one-shot ?signedIn=1 marker from the address bar.
     const u = new URL(window.location.href);
     if (u.searchParams.has("signedIn")) {
@@ -33,7 +33,6 @@ export function useWorkspaceSync(): number {
     }
     return () => {
       window.removeEventListener(WORKSPACE_REPLACED, bump);
-      window.removeEventListener("metainfo:account-stale", stale);
     };
   }, []);
   return gen;
@@ -70,6 +69,13 @@ function statusText(s: SyncStatus): string {
 
 export default function AccountMenu() {
   const account = useAccount();
+  if (!account.enabled || !account.loaded) return null;
+  return <ClerkAccountMenu account={account} />;
+}
+
+/** Rendered only when Clerk is set up, so its hooks always have a provider. */
+function ClerkAccountMenu({ account }: { account: Account }) {
+  const clerk = useClerk();
   const sync = useSyncStatus();
   const path = usePathname();
   const router = useRouter();
@@ -90,9 +96,8 @@ export default function AccountMenu() {
     };
   }, [open]);
 
-  if (!account) return null;
   if (!account.authenticated) {
-    if (!account.providers.length || path === "/login") return null;
+    if (path === "/login") return null;
     return (
       <Link className="btn btn-sm" href={`/login?returnTo=${encodeURIComponent(path)}`} title="Optional: save projects and history to an account and share them with your team">
         Sign in to save
@@ -100,25 +105,31 @@ export default function AccountMenu() {
     );
   }
 
-  const switchOrg = async (orgId: string) => {
+  // Push pending changes to the current workspace before Clerk makes another one active.
+  const switchTo = async (id: string, personal: boolean) => {
     setBusy(true);
     try {
       await flushSync();
-      await api("/api/session/org", { method: "POST", json: { orgId } });
-      await loadAccount(true);
+      await clerk.setActive({ organization: personal ? null : id });
       setOpen(false);
     } finally {
       setBusy(false);
     }
   };
 
+  const newOrg = async () => {
+    setOpen(false);
+    await flushSync();
+    clerk.openCreateOrganization({ afterCreateOrganizationUrl: "/organisation" });
+  };
+
   const signOut = async () => {
     setBusy(true);
     try {
       await flushSync();
-      await api("/auth/logout", { method: "POST" });
       stopSync();
       clearLocalWorkspace();
+      await clerk.signOut();
       // A full load on purpose: every page still holds the cleared workspace in memory.
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination
       window.location.href = "/";
@@ -130,9 +141,9 @@ export default function AccountMenu() {
   const tone = sync.state === "error" ? "var(--fail)" : sync.state === "offline" ? "var(--warn)" : undefined;
   return (
     <div className="acct" ref={ref}>
-      <button className="acct-btn" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu" aria-label="Account and organisation">
+      <button className="acct-btn" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu" aria-label="Account and workspace">
         <Avatar account={account} />
-        <span className="acct-org">{account.org?.name}</span>
+        <span className="acct-org">{account.workspace?.name}</span>
         {sync.state === "error" && <span className="dot" style={{ background: "var(--fail)" }} aria-label="Sync error" />}
       </button>
       {open && (
@@ -146,21 +157,24 @@ export default function AccountMenu() {
           </div>
           <div className="small" style={{ color: tone ?? "var(--text-2)", padding: "0 12px 8px" }} aria-live="polite">{statusText(sync)}</div>
           <div className="acct-sep" />
-          <div className="acct-label">Organisations</div>
-          {account.orgs?.map((o) => (
-            <button key={o.id} role="menuitemradio" aria-checked={o.id === account.org?.id} className="acct-item" disabled={busy} onClick={() => o.id !== account.org?.id && void switchOrg(o.id)}>
-              <span style={{ flex: 1, minWidth: 0 }} className="break">{o.name}</span>
-              <span className="muted small">{o.role}</span>
-              {o.id === account.org?.id && <span aria-hidden>✓</span>}
+          <div className="acct-label">Workspaces</div>
+          {account.workspaces?.map((w) => (
+            <button key={w.id} role="menuitemradio" aria-checked={w.id === account.workspace?.id} className="acct-item" disabled={busy} onClick={() => w.id !== account.workspace?.id && void switchTo(w.id, w.personal)}>
+              <span style={{ flex: 1, minWidth: 0 }} className="break">{w.name}</span>
+              <span className="muted small">{w.personal ? "just you" : w.role}</span>
+              {w.id === account.workspace?.id && <span aria-hidden>✓</span>}
             </button>
           ))}
           <button role="menuitem" className="acct-item" onClick={() => { setOpen(false); router.push("/organisation"); }}>
             Members and invites
           </button>
-          <button role="menuitem" className="acct-item" onClick={() => { setOpen(false); router.push("/organisation?new=1"); }}>
+          <button role="menuitem" className="acct-item" onClick={() => void newOrg()}>
             New organisation
           </button>
           <div className="acct-sep" />
+          <button role="menuitem" className="acct-item" onClick={() => { setOpen(false); clerk.openUserProfile(); }}>
+            Account settings
+          </button>
           <button role="menuitem" className="acct-item" disabled={busy} onClick={() => void signOut()}>
             Sign out
           </button>

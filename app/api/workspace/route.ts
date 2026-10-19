@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AuthError } from "@/lib/server/auth/accounts";
-import { handle, requireOrg } from "@/lib/server/auth/session";
+import { handle, requireWorkspace } from "@/lib/server/auth/session";
 import { isSyncedKey, MAX_KEYS, MAX_VALUE_BYTES } from "@/lib/workspace-keys";
 
 export const dynamic = "force-dynamic";
@@ -12,16 +12,19 @@ interface Row {
   updatedAt: number;
 }
 
-/** GET → the active organisation's whole workspace: { orgId, entries: { key: { value, version, updatedAt } } }. */
+/**
+ * GET → the active workspace: { orgId, entries: { key: { value, version, updatedAt } } }. `orgId` is the
+ * client's name for the workspace: the active Clerk organisation, or the user id for a personal workspace.
+ */
 export async function GET(req: NextRequest) {
   return handle(async () => {
-    const s = await requireOrg(req);
+    const s = await requireWorkspace(req);
     const { results } = await s.db
       .prepare("SELECT key, value, version, updated_at AS updatedAt FROM workspace WHERE org_id = ?")
-      .bind(s.org.id)
+      .bind(s.orgId)
       .all<Row>();
     return NextResponse.json(
-      { orgId: s.org.id, entries: Object.fromEntries(results.map(({ key, ...r }) => [key, r])) },
+      { orgId: s.scope, entries: Object.fromEntries(results.map(({ key, ...r }) => [key, r])) },
       { headers: { "cache-control": "no-store" } },
     );
   });
@@ -35,16 +38,16 @@ export async function GET(req: NextRequest) {
  */
 export async function PUT(req: NextRequest) {
   return handle(async () => {
-    const s = await requireOrg(req);
+    const s = await requireWorkspace(req);
     const body = (await req.json().catch(() => null)) as { orgId?: string; changes?: { key: string; value: string | null; baseVersion: number }[] } | null;
     // Guard against a tab that's still showing another organisation's data.
-    if (body?.orgId !== s.org.id) throw new AuthError("Your active organisation changed in another tab. Reload to continue.", 409);
+    if (body?.orgId !== s.scope) throw new AuthError("Your active workspace changed in another tab. Reload to continue.", 409);
     const changes = (body.changes ?? []).slice(0, 50);
     for (const c of changes) {
       if (!isSyncedKey(c.key)) throw new AuthError(`${c.key} isn't part of a workspace.`);
       if (c.value != null && (typeof c.value !== "string" || c.value.length > MAX_VALUE_BYTES)) throw new AuthError(`${c.key} is larger than ${MAX_VALUE_BYTES / 1e6} MB.`, 413);
     }
-    const count = (await s.db.prepare("SELECT COUNT(*) AS n FROM workspace WHERE org_id = ?").bind(s.org.id).first<{ n: number }>())?.n ?? 0;
+    const count = (await s.db.prepare("SELECT COUNT(*) AS n FROM workspace WHERE org_id = ?").bind(s.orgId).first<{ n: number }>())?.n ?? 0;
     if (count + changes.length > MAX_KEYS) throw new AuthError("This workspace has too many items to sync.", 413);
 
     const t = Date.now();
@@ -57,14 +60,14 @@ export async function PUT(req: NextRequest) {
                updated_at = excluded.updated_at, updated_by = excluded.updated_by
              WHERE workspace.version = ?`,
           )
-          .bind(s.org.id, c.key, c.value ?? "null", t, s.user.id, c.baseVersion),
+          .bind(s.orgId, c.key, c.value ?? "null", t, s.userId, c.baseVersion),
       ),
     );
     const keys = changes.map((c) => c.key);
     const { results: now } = keys.length
       ? await s.db
           .prepare(`SELECT key, value, version, updated_at AS updatedAt FROM workspace WHERE org_id = ? AND key IN (${keys.map(() => "?").join(",")})`)
-          .bind(s.org.id, ...keys)
+          .bind(s.orgId, ...keys)
           .all<Row>()
       : { results: [] as Row[] };
     const byKey = new Map(now.map((r) => [r.key, r]));

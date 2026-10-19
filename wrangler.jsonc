@@ -16,7 +16,7 @@
       "service": "metainfo"
     }
   ],
-  // Accounts, organisations and synced workspaces (sign-in is optional).
+  // Synced workspaces (sign-in is optional; accounts and organisations are in Clerk).
   // Apply migrations with: npx wrangler d1 migrations apply metainfo --remote
   "d1_databases": [
     {
@@ -28,5 +28,5 @@
   ],
   "observability": { "enabled": true }
   // Secrets (optional): wrangler secret put DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD / RESEARCH_TOKEN
-  // Sign-in: APP_URL, AUTH_SECRET, and GOOGLE_AUTH_CLIENT_ID/SECRET and/or GITHUB_AUTH_CLIENT_ID/SECRET
+  // Sign-in (Clerk): CLERK_SECRET_KEY; NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is needed at build time instead
 }
