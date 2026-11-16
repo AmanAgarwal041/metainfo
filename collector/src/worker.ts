@@ -1,6 +1,7 @@
 /**
  * MetaInfo traffic collector as a Cloudflare Worker route in front of any site whose DNS is proxied by
- * Cloudflare (orange cloud), wherever the site itself is hosted: Vercel, AWS, a VPS, WordPress hosting...
+ * Cloudflare (orange cloud), wherever the site itself is hosted: Vercel, AWS, a VPS, WordPress hosting, or
+ * Cloudflare Pages itself (add the route on the Pages project's custom domain; the worker runs before Pages).
  *
  * It passes every request to your origin untouched and reports page loads to MetaInfo in the background.
  * If this worker ever throws, Cloudflare sends the request straight to your origin.

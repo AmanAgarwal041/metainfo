@@ -46,7 +46,7 @@ the three reports nothing and logs a warning.
 | Your site | Use | Sees status codes |
 |---|---|---|
 | DNS proxied by Cloudflare (orange cloud), hosted **anywhere** | `src/worker.ts` as a Worker route | ✅ |
-| Cloudflare Pages | `src/pages.ts` as Pages Functions middleware | ✅ |
+| Cloudflare Pages with a custom domain | `src/worker.ts` as a Worker route on that domain (no change to the site), or `src/pages.ts` as Functions middleware | ✅ |
 | The site is itself a Cloudflare Worker (OpenNext, Astro, Remix, Hono, Workers assets) | `src/wrap.ts` around your handler | ✅ |
 | Next.js on Vercel, Netlify, Cloudflare (next-on-pages) or self-hosted | `src/next.ts` from `proxy.ts` / `middleware.ts` | Only for responses the proxy sends itself; rendered pages report status 0 |
 | Anything else with `Request` and `waitUntil` (Deno, Netlify Edge, Bun...) | `src/core.ts`: `createCollector(...).observe(request, status, waitUntil)` | ✅ |
@@ -72,7 +72,13 @@ route `example.com/*` (plus `www.example.com/*` if you use it). The worker forwa
 
 ### Cloudflare Pages
 
-Copy `core.ts` and `pages.ts` **outside** `functions/`, because every file in `functions/` becomes a route:
+**Recommended: a Worker route in front of Pages.** Deploy the collector worker exactly as above, then add the routes
+`example.com/*` and `www.example.com/*` in the zone that holds your Pages custom domain. Cloudflare runs the route
+worker before Pages, the worker hands each request to Pages untouched, and it sees every response's status: static
+pages, Functions and next-on-pages apps alike. Your Pages project doesn't change. Routes can't be added to
+`*.pages.dev`, so visits there aren't reported.
+
+**Or, inside the Pages project: Functions middleware.** Copy `core.ts` and `pages.ts` **outside** `functions/`, because every file in `functions/` becomes a route:
 
 ```bash
 mkdir -p lib/metainfo && cd lib/metainfo

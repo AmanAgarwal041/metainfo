@@ -266,9 +266,13 @@ function TokenCard({ token, site }: { token: string; site: CollectorSite }) {
 type Platform = "worker" | "pages" | "wrap" | "next";
 const PLATFORMS: { id: Platform; label: string; hint: string }[] = [
   { id: "worker", label: "Cloudflare (any host)", hint: "Your DNS is on Cloudflare (orange cloud). The site can be hosted anywhere: Vercel, AWS, a VPS, WordPress…" },
-  { id: "pages", label: "Cloudflare Pages", hint: "Your site is deployed on Cloudflare Pages." },
+  {
+    id: "pages",
+    label: "Cloudflare Pages",
+    hint: "Your site is deployed on Cloudflare Pages with a custom domain on Cloudflare. The collector runs as its own worker on your domain's route, in front of Pages: no change to your site's code, and it sees every page's status, including static files and next-on-pages.",
+  },
   { id: "wrap", label: "Site on Workers", hint: "Your site is itself a Cloudflare Worker (Workers assets, OpenNext, Astro, Remix, Hono…). A route runs one worker, so wrap yours." },
-  { id: "next", label: "Next.js / Vercel", hint: "Any Next.js app: Vercel, Netlify, Cloudflare (next-on-pages) or self-hosted. Pages your app renders are reported without a status (the proxy runs first), so crawler errors on them won't show." },
+  { id: "next", label: "Next.js / Vercel", hint: "Any Next.js app: Vercel, Netlify, Cloudflare (next-on-pages) or self-hosted. Pages your app renders are reported without a status (the proxy runs first), so crawler errors on them won't show. On Cloudflare Pages, the Cloudflare Pages tab's worker route sees them." },
 ];
 
 function Setup({ site, token }: { site: CollectorSite; token: string | null }) {
@@ -314,9 +318,36 @@ function Setup({ site, token }: { site: CollectorSite; token: string | null }) {
       },
     ],
     pages: [
-      { title: "Add the collector files (outside functions/, where every file becomes a route)", code: fetchFiles(["pages"]) },
-      { title: "Create functions/_middleware.ts", code: `export { onRequest } from "../lib/metainfo/pages";` },
-      { title: "Add the secrets and redeploy", body: <>Pages project → Settings → Variables and Secrets → add {names} as type Secret:</>, code: envFile },
+      {
+        title: "Deploy the collector worker",
+        body: (
+          <>
+            It&apos;s a separate worker, not part of your Pages project. One click:{" "}
+            <a href={`https://deploy.workers.cloudflare.com/?url=${COLLECTOR_REPO}/tree/main/collector`} target="_blank" rel="noreferrer">Deploy to Cloudflare</a> (it asks for {names}). Or by hand:
+          </>
+        ),
+        code: `git clone --depth 1 ${COLLECTOR_REPO}.git && cd metainfo/collector\nnpm install\nnpx wrangler deploy\n${wranglerSecrets}`,
+      },
+      {
+        title: "Route your Pages domain through it",
+        body: (
+          <>
+            Cloudflare dashboard → Workers &amp; Pages → <b>metainfo-collector</b> → Settings → Domains &amp; Routes → Add route <code>{`${domain}/*`}</code> (and{" "}
+            <code>{`www.${domain}/*`}</code> if you use it), in the zone that holds your Pages custom domain. The worker hands every request to Pages untouched. Routes
+            can&apos;t be added to <code>*.pages.dev</code>, so visits there aren&apos;t reported.
+          </>
+        ),
+      },
+      {
+        title: "Or, inside the Pages project instead: Functions middleware",
+        body: (
+          <>
+            Copy the files outside <code>functions/</code> (every file there becomes a route), add <code>functions/_middleware.ts</code>, then add {names} under Settings →
+            Variables and Secrets and redeploy. It only sees requests that reach Functions, so check <code>_routes.json</code> doesn&apos;t exclude your pages.
+          </>
+        ),
+        code: `${fetchFiles(["pages"])}\n\n# functions/_middleware.ts\nexport { onRequest } from "../lib/metainfo/pages";\n\n# Settings → Variables and Secrets\n${envFile}`,
+      },
     ],
     wrap: [
       { title: "Add the collector files", code: fetchFiles(["wrap"]) },
@@ -546,7 +577,7 @@ function Failures({ stats, statusKnown, via, domain }: { stats: TrafficStats; st
     return (
       <div className="notice small">
         {via === "next" ? "The Next.js proxy runs before your pages render, so it can't see response statuses." : "Statuses weren't reported."} To see which crawlers get
-        errors (a WAF or bot protection blocking GPTBot, say), use the Cloudflare Worker route instead.
+        errors (a WAF or bot protection blocking GPTBot, say), use the Cloudflare Worker route instead (it also works in front of Cloudflare Pages).
       </div>
     );
   }

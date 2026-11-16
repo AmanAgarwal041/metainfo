@@ -56,7 +56,7 @@ syncs your workspace.
 
 * **Dashboard:** per-platform scores over time, AI search readiness, next fixes and a setup checklist per project.
 * **Rank tracking** and **AI visibility** (does ChatGPT, Claude, Gemini or Perplexity mention or cite you?): DataForSEO only, with a cost estimate before each run.
-* **Traffic:** which crawlers actually visit (GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, Googlebot…), the pages they read, the errors they get, and the people who click through from AI answers. It needs a small [collector](collector/) at your site's edge: a Cloudflare Worker route (works whatever the host), Pages middleware, a Worker wrapper or a Next.js proxy. No IPs or cookies are collected. Needs sign-in.
+* **Traffic:** which crawlers actually visit (GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, Googlebot…), the pages they read, the errors they get, and the people who click through from AI answers. It needs a small [collector](collector/) at your site's edge: a Cloudflare Worker route (works whatever the host, Cloudflare Pages included), Pages middleware, a Worker wrapper or a Next.js proxy. No IPs or cookies are collected. Needs sign-in.
 
 **Integrate**
 
@@ -168,7 +168,7 @@ RESEARCH_TOKEN=some-secret                # strongly recommended when deployed
   * Results show mention and citation rates, competitor gaps, cited sources, the full answer with your brand highlighted, and a trend across runs.
   * The free part is AI readiness from your latest audit.
 * **Traffic (`/traffic`):** real page loads reported by the [collector](collector/README.md), per project. Signed in only (the counts live in D1).
-  * Admins create a site's collector settings: three secrets, `METAINFO_TOKEN`, `METAINFO_ORG` (the workspace id) and `METAINFO_SITE` (the site URL). Events are accepted only when all three match, so data from many workspaces and sites never mixes. Then install one adapter: a Cloudflare Worker route in front of any site on Cloudflare DNS, Pages Functions middleware, `withMetainfo()` around a Worker-hosted site, or `reportToMetainfo()` in a Next.js `proxy.ts`.
+  * Admins create a site's collector settings: three secrets, `METAINFO_TOKEN`, `METAINFO_ORG` (the workspace id) and `METAINFO_SITE` (the site URL). Events are accepted only when all three match, so data from many workspaces and sites never mixes. Then install one adapter: a Cloudflare Worker route in front of any site on Cloudflare DNS (Cloudflare Pages custom domains included), Pages Functions middleware, `withMetainfo()` around a Worker-hosted site, or `reportToMetainfo()` in a Next.js `proxy.ts`.
   * Collectors send NDJSON to `POST /api/traffic/events`. The server classifies each visitor (`lib/traffic.ts`: about 35 AI, search and preview crawlers, signed agents and generic bots; referrals from ChatGPT, Perplexity, Claude, Gemini, Copilot…) and stores only hourly counts, kept for 120 days.
   * It shows page loads by visitor type, each crawler's hits and error rate, crawlers that got 4xx/5xx by path, the pages AI crawlers read, where people came from, and where people from AI answers landed.
   * The dashboard has a Traffic panel (30 days), and the audit's crawler matrix gets a "Real visits" column when the audited site is the project's.
