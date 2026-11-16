@@ -1,0 +1,22 @@
+name = "metainfo-collector"
+main = "src/worker.ts"
+compatibility_date = "2025-10-01"
+
+# Put the worker in front of your site: Cloudflare dashboard → Workers → this worker → Settings → Domains & Routes
+# → Add route (e.g. `example.com/*`, and `www.example.com/*` if you use it). Or uncomment:
+# routes = [{ pattern = "example.com/*", zone_name = "example.com" }]
+
+[vars]
+# Only for a self-hosted MetaInfo; the hosted one is the default.
+# METAINFO_ENDPOINT = "https://your-metainfo.example.com/api/traffic/events"
+# Kill switch: "1" and the worker only passes traffic through.
+# METAINFO_DISABLED = "1"
+
+# Secrets, never in this file (all three are on MetaInfo's Traffic page; events are only accepted when they match):
+#   npx wrangler secret put METAINFO_TOKEN   # mtr_...
+#   npx wrangler secret put METAINFO_ORG     # org_... (or user_... for a personal workspace)
+#   npx wrangler secret put METAINFO_SITE    # https://example.com
+# Local development: put them in .dev.vars (gitignored; see .dev.vars.example).
+
+[observability]
+enabled = true

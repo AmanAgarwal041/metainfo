@@ -1,7 +1,15 @@
 "use client";
 
+import Link from "next/link";
+import { useProject } from "@/lib/project";
+import { hostMatches } from "@/lib/traffic";
+import { useTraffic } from "@/lib/traffic-client";
 import { PLATFORM_META, type CrawlerAccess, type Report } from "@/lib/types";
-import { CodeBlock } from "./ui";
+import { CodeBlock, hostOf } from "./ui";
+
+/** robots.txt tokens that no crawler sends as a user agent: their visits show up as the main crawler's. */
+const TOKEN_ONLY = new Set(["google-extended", "applebot-extended"]);
+const DAYS = 30;
 
 const PURPOSE: Record<CrawlerAccess["purpose"], string> = {
   search: "Search index",
@@ -16,6 +24,12 @@ function Verdict({ ok, label }: { ok: boolean | null | undefined; label?: string
 
 export default function Crawlers({ report }: { report: Report }) {
   const { robots, sitemap, llms } = report;
+  // Real visits from the project's traffic collector, when this audit is of the project's site.
+  const [project] = useProject();
+  const ours = !!project.id && hostMatches(hostOf(report.finalUrl || report.url), project.domain);
+  const traffic = useTraffic(ours ? project.id : null, DAYS);
+  const seen = traffic.state === "ready" && traffic.site.lastEventAt ? traffic.stats : null;
+  const visits = (id: string) => seen?.agents.filter((a) => a.agent === id).reduce((v, a) => ({ hits: v.hits + a.hits, errors: v.errors + a.errors }), { hits: 0, errors: 0 });
   if (report.crawlers.length === 0) {
     return (
       <div className="card empty">
@@ -41,6 +55,7 @@ export default function Crawlers({ report }: { report: Report }) {
                 <th>Platform</th>
                 <th>robots.txt</th>
                 <th>Server response</th>
+                {seen && <th>Real visits ({DAYS} days)</th>}
                 <th>Result</th>
               </tr>
             </thead>
@@ -80,6 +95,24 @@ export default function Crawlers({ report }: { report: Report }) {
                       <span className="na" title="Training crawlers aren't probed">-</span>
                     )}
                   </td>
+                  {seen && (
+                    <td>
+                      {TOKEN_ONLY.has(c.id) ? (
+                        <span className="na" title="A robots.txt token only: this crawler visits as Googlebot or Applebot">-</span>
+                      ) : (
+                        (() => {
+                          const v = visits(c.id)!;
+                          if (!v.hits) return <span className="muted small">None</span>;
+                          return (
+                            <>
+                              <b className="mono">{v.hits.toLocaleString()}</b>
+                              {v.errors > 0 && <div className="no small">{v.errors.toLocaleString()} got errors</div>}
+                            </>
+                          );
+                        })()
+                      )}
+                    </td>
+                  )}
                   <td>
                     <Verdict ok={c.allowed} label={c.allowed ? "✓ Can access" : "✕ Blocked"} />
                   </td>
@@ -95,6 +128,16 @@ export default function Crawlers({ report }: { report: Report }) {
             bot analytics to confirm the AI crawlers are served.
           </div>
         )}
+        {seen ? (
+          <p className="muted small" style={{ marginTop: 10 }}>
+            Real visits are page loads your <Link href="/traffic">traffic collector</Link> reported for {traffic.state === "ready" ? traffic.site.domain : "this site"}, across the whole
+            site. A crawler with visits that got errors is being blocked even if robots.txt allows it.
+          </p>
+        ) : ours && (traffic.state === "none" || (traffic.state === "ready" && !traffic.site.lastEventAt)) ? (
+          <p className="muted small" style={{ marginTop: 10 }}>
+            These are probes. <Link href="/traffic">Connect a traffic collector</Link> to add each crawler&apos;s real visits to this table.
+          </p>
+        ) : null}
         <p className="muted small" style={{ marginTop: 10 }}>
           Probes send only the crawler&apos;s user-agent string from our server. CDNs that verify bots by IP (Cloudflare, Akamai) may
           treat the real crawler differently. Confirm in your CDN&apos;s bot analytics.
