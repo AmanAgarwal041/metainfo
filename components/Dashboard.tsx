@@ -8,11 +8,13 @@ import { createProject, useProject, useProjects } from "@/lib/project";
 import { loadCrawlHistory } from "@/lib/site-audit";
 import { rankHistory, rankKey } from "@/lib/rank-history";
 import { AI_ENGINES, locationByCode } from "@/lib/research-types";
+import { useTraffic } from "@/lib/traffic-client";
 import { PLATFORM_META, PLATFORMS } from "@/lib/types";
 import { LineChart, Distribution } from "./charts";
 import { IconArrow, IconCheck } from "./icons";
 import { Delta, EmptyState, Kpi, PageHead } from "./kit";
 import { useResearchStatus } from "./research/common";
+import { TrafficOverview } from "./Traffic";
 import { scoreColor, SeverityBadge } from "./ui";
 
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -52,6 +54,7 @@ export default function Dashboard() {
   const [runs, setRuns] = useState<AiRun[]>([]);
   const [mcpSeen, setMcpSeen] = useState(false);
   const [crawled, setCrawled] = useState(false);
+  const traffic = useTraffic(project.id || null, 30);
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- hydrate browser-stored history for the active project */
@@ -103,6 +106,9 @@ export default function Dashboard() {
     { done: project.prompts.length > 0, label: "Add AI prompts to monitor", href: "/ai-visibility" },
     { done: !!status?.dataforseo, label: "Connect DataForSEO for volumes, rankings and AI answers", href: "/settings#data" },
     { done: mcpSeen, label: "Connect your AI agent over MCP", href: "/settings#mcp" },
+    ...(traffic.state === "unavailable" && !traffic.canSignIn
+      ? []
+      : [{ done: traffic.state === "ready" && !!traffic.site.lastEventAt, label: "Connect a traffic collector to see real crawler visits", href: "/traffic" }]),
   ];
   const remaining = steps.filter((s) => !s.done).length;
 
@@ -267,6 +273,8 @@ export default function Dashboard() {
               <p className="muted">{project.keywords.length ? "Run a rank check to see where you stand." : "Track keywords to see positions and movement here."}</p>
             )}
           </section>
+
+          <TrafficOverview view={traffic} />
 
           <section className="card card-pad b-12">
             <div className="panel-head">

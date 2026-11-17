@@ -17,6 +17,7 @@ import {
   IconMonitor,
   IconMoon,
   IconPlug,
+  IconPulse,
   IconRobot,
   IconSchema,
   IconSearch,
@@ -53,7 +54,13 @@ const NAV: { label?: string; items: Item[] }[] = [
       { href: "/backlinks", label: "Backlinks", icon: IconLink },
     ],
   },
-  { label: "Track", items: [{ href: "/rankings", label: "Rank tracking", icon: IconTrend }] },
+  {
+    label: "Track",
+    items: [
+      { href: "/rankings", label: "Rank tracking", icon: IconTrend },
+      { href: "/traffic", label: "Traffic", icon: IconPulse },
+    ],
+  },
 ];
 const ALL = NAV.flatMap((g) => g.items);
 

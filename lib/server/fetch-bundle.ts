@@ -152,6 +152,9 @@ async function fetchFollow(
         "user-agent": opts.ua,
         accept: opts.accept ?? "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "accept-language": "en-US,en;q=0.9",
+        // Tells a MetaInfo traffic collector (collector/) on the audited site not to count this as a real visit:
+        // the crawler-access probes use GPTBot's, ClaudeBot's... user agents.
+        "x-metainfo-probe": "1",
       },
     });
     const ttfbMs = Math.round(performance.now() - t0);

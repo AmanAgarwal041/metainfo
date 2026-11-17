@@ -1,0 +1,33 @@
+{
+  "name": "metainfo-collector",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reports page loads (people, AI crawlers, search engines) from your site's edge to MetaInfo's Traffic page.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "wrangler": "^4.148.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "METAINFO_TOKEN": {
+        "description": "The collector token from MetaInfo's Traffic page (starts with mtr_)."
+      },
+      "METAINFO_ORG": {
+        "description": "Your workspace id from MetaInfo's Traffic page (org_... or user_...)."
+      },
+      "METAINFO_SITE": {
+        "description": "Your site's URL as shown on the Traffic page, e.g. https://example.com."
+      },
+      "METAINFO_ENDPOINT": {
+        "description": "Only for a self-hosted MetaInfo: https://your-metainfo/api/traffic/events. Leave the default otherwise."
+      }
+    }
+  }
+}
