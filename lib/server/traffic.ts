@@ -15,6 +15,7 @@ import {
   referralSource,
   type CollectorSite,
   type Kind,
+  type PageStat,
   type TrafficEvent,
   type TrafficStats,
 } from "@/lib/traffic";
@@ -251,7 +252,9 @@ export async function trafficStats(db: D1Database, siteId: string, days: number)
     db.prepare(sql).bind(siteId, from, ...extra).all<T>().then((r) => r.results);
   const W = "WHERE site_id = ? AND hour >= ?";
 
-  const [daily, aiDaily, agents, failures, aiPaths, sources, aiLandings, topPages] = await Promise.all([
+  const prevFrom = from - days * 24;
+  const literals = (xs: string[]) => xs.map((k) => `'${k}'`).join(",");
+  const [daily, aiDaily, agents, failures, aiPaths, sources, aiLandings, topPages, pages, visitorFailures, prevKinds, prevAi] = await Promise.all([
     q<{ day: number; kind: Kind; hits: number }>(`SELECT hour / 24 AS day, kind, SUM(hits) AS hits FROM traffic_hits ${W} GROUP BY day, kind`),
     q<{ day: number; hits: number }>(
       `SELECT hour / 24 AS day, SUM(hits) AS hits FROM traffic_hits ${W} AND kind = 'human' AND source IN (${inList(AI_SOURCE_IDS)}) GROUP BY day`,
@@ -281,7 +284,34 @@ export async function trafficStats(db: D1Database, siteId: string, days: number)
       ...AI_SOURCE_IDS,
     ),
     q<{ path: string; hits: number }>(`SELECT path, SUM(hits) AS hits FROM traffic_hits ${W} AND kind = 'human' GROUP BY path ORDER BY hits DESC LIMIT 15`),
+    // Kinds and source ids are constants (lib/traffic.ts), inlined because they come before the bound WHERE.
+    q<PageStat>(
+      `SELECT path,
+              SUM(CASE WHEN kind = 'human' THEN hits ELSE 0 END) AS people,
+              SUM(CASE WHEN kind = 'human' AND source IN (${literals(AI_SOURCE_IDS)}) THEN hits ELSE 0 END) AS aiReferrals,
+              SUM(CASE WHEN kind IN ('ai_search', 'ai_user') THEN hits ELSE 0 END) AS aiAnswerCrawls,
+              SUM(CASE WHEN kind = 'ai_training' THEN hits ELSE 0 END) AS aiTrainingCrawls,
+              SUM(CASE WHEN kind = 'search' THEN hits ELSE 0 END) AS searchCrawls,
+              SUM(CASE WHEN status >= 400 THEN hits ELSE 0 END) AS errors
+       FROM traffic_hits ${W} AND path != '' AND kind IN (${literals(["human", ...AI_KINDS, "search"])})
+       GROUP BY path ORDER BY SUM(hits) DESC LIMIT 60`,
+    ),
+    q<{ kind: Kind; agent: string; status: number; path: string; hits: number }>(
+      `SELECT kind, agent, status, path, SUM(hits) AS hits FROM traffic_hits ${W}
+       AND kind IN ('human', 'preview') AND status >= 400 GROUP BY kind, agent, status, path ORDER BY hits DESC LIMIT 30`,
+    ),
+    db
+      .prepare("SELECT kind, SUM(hits) AS hits FROM traffic_hits WHERE site_id = ? AND hour >= ? AND hour < ? GROUP BY kind")
+      .bind(siteId, prevFrom, from)
+      .all<{ kind: Kind; hits: number }>()
+      .then((r) => r.results),
+    db
+      .prepare(`SELECT SUM(hits) AS hits FROM traffic_hits WHERE site_id = ? AND hour >= ? AND hour < ? AND kind = 'human' AND source IN (${inList(AI_SOURCE_IDS)})`)
+      .bind(siteId, prevFrom, from, ...AI_SOURCE_IDS)
+      .first<{ hits: number | null }>(),
   ]);
+  const prevTotals = { human: 0, ai_search: 0, ai_user: 0, ai_training: 0, search: 0, preview: 0, bot: 0 } as Record<Kind, number>;
+  for (const r of prevKinds) prevTotals[r.kind] = r.hits;
 
   const totals = { human: 0, ai_search: 0, ai_user: 0, ai_training: 0, search: 0, preview: 0, bot: 0 } as Record<Kind, number>;
   const byDay = new Map<number, TrafficStats["daily"][number]>();
@@ -306,5 +336,10 @@ export async function trafficStats(db: D1Database, siteId: string, days: number)
     sources,
     aiLandings,
     topPages,
+    pages,
+    visitorFailures,
+    previous: { totals: prevTotals, aiReferrals: prevAi?.hits ?? 0 },
   };
 }
+
+export { projectOf } from "./traffic-projects";

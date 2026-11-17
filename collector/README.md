@@ -163,6 +163,9 @@ is `202 { accepted, rejected, reasons }`. MetaInfo refuses these events:
 
 ## Develop
 
+`src/worker.ts` is also bundled into MetaInfo (`lib/server/collector-bundle.ts`) for one-click Cloudflare setup. After changing
+anything in `src/`, run `npm run build:collector` in the repository root.
+
 ```bash
 npm test          # node:test, no install needed (Node 22+)
 npm run typecheck

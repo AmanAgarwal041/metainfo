@@ -3,6 +3,22 @@
 // page (labels). Collectors only forward raw request facts; who a client is
 // gets decided here, so the list improves without anyone redeploying.
 
+/** Where collectors send events. Kept here and in collector/src/core.ts (DEFAULT_ENDPOINT). */
+export const HOSTED_ENDPOINT = "https://metainfo.agarwal-aman041.workers.dev/api/traffic/events";
+
+/** The Cloudflare API token permissions one-click setup needs: upload a worker, add its routes, find the zone. */
+export const CLOUDFLARE_TOKEN_PERMISSIONS = [
+  { key: "workers_scripts", type: "edit" },
+  { key: "workers_routes", type: "edit" },
+  { key: "zone", type: "read" },
+] as const;
+
+/** Cloudflare's "Create API token" form, pre-filled with a name and those permissions. */
+export function cloudflareTokenUrl(domain: string): string {
+  const q = { permissionGroupKeys: JSON.stringify(CLOUDFLARE_TOKEN_PERMISSIONS), accountId: "*", zoneId: "all", name: `MetaInfo collector (${domain})` };
+  return `https://dash.cloudflare.com/profile/api-tokens?${Object.entries(q).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&")}`;
+}
+
 /** What a collector sends: one JSON object per line (NDJSON), protocol v1. Mirrors collector/src/core.ts. */
 export interface TrafficEvent {
   v: 1;
@@ -228,6 +244,25 @@ export interface TrafficStats {
   /** Pages people from AI answers landed on. */
   aiLandings: { path: string; source: string; hits: number }[];
   topPages: { path: string; hits: number }[];
+  /** Per page, who reads it: the most visited pages (by people or crawlers), for the suggestions. */
+  pages: PageStat[];
+  /** People and link previews (Slack, LinkedIn...) that got an error, by path. */
+  visitorFailures: { kind: Kind; agent: string; status: number; path: string; hits: number }[];
+  /** The same length of time just before this one, to tell what's growing. */
+  previous: { totals: Record<Kind, number>; aiReferrals: number };
+}
+
+export interface PageStat {
+  path: string;
+  people: number;
+  /** People who came from an AI answer. */
+  aiReferrals: number;
+  /** AI crawlers that fetch pages to answer or cite now (AI search, live fetch). */
+  aiAnswerCrawls: number;
+  aiTrainingCrawls: number;
+  searchCrawls: number;
+  /** Responses of 400 or more, to anyone. */
+  errors: number;
 }
 
 /** A project's collector, as the API shows it (never the token). */
