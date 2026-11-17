@@ -8,8 +8,7 @@ import { getToken } from "@clerk/nextjs";
 import { useAccount } from "@/lib/account";
 import type { CollectorSite, TrafficStats } from "@/lib/traffic";
 
-/** Where collectors send events. Kept here and in collector/src/core.ts (DEFAULT_ENDPOINT). */
-export const HOSTED_ENDPOINT = "https://metainfo.agarwal-aman041.workers.dev/api/traffic/events";
+export { HOSTED_ENDPOINT } from "@/lib/traffic";
 /** Where the collector's source lives (links and curl commands in the setup steps). */
 export const COLLECTOR_REPO = "https://github.com/AmanAgarwal041/metainfo";
 export const COLLECTOR_RAW = "https://raw.githubusercontent.com/AmanAgarwal041/metainfo/main/collector/src";
@@ -69,3 +68,38 @@ export function useTraffic(projectId: string | null, days: number): TrafficView 
   if (!key) return { state: "unavailable", canSignIn: account.enabled && !account.authenticated };
   return result?.key === key ? result.view : { state: "loading" };
 }
+
+export interface CloudflareConflict {
+  pattern: string;
+  script: string;
+}
+export interface CloudflareDeploy {
+  account: string;
+  zone: string;
+  worker: string;
+  version: string;
+  routes: { pattern: string; action: "created" | "kept" | "replaced" }[];
+}
+
+/** One-click Cloudflare setup. A 409 carries the routes another worker holds; nothing changed then. */
+export async function deployToCloudflare(projectId: string, apiToken: string, replace: boolean) {
+  const token = await getToken().catch(() => null);
+  const res = await fetch("/api/traffic/cloudflare", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ projectId, apiToken, replace }),
+    cache: "no-store",
+  });
+  const json = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    conflicts?: CloudflareConflict[];
+    site?: CollectorSite;
+    deploy?: CloudflareDeploy;
+    warning?: string;
+  };
+  if (res.status === 409) return { conflicts: json.conflicts ?? [] } as const;
+  if (!res.ok || !json.site || !json.deploy) throw new TrafficError(json.error ?? `Request failed (HTTP ${res.status})`, res.status);
+  return { site: json.site, deploy: json.deploy, warning: json.warning } as const;
+}
+
+export const sendTestVisit = (projectId: string) => call<{ ok: boolean; status?: number; error?: string }>("POST", "/api/traffic/check", { projectId });

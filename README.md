@@ -56,7 +56,7 @@ syncs your workspace.
 
 * **Dashboard:** per-platform scores over time, AI search readiness, next fixes and a setup checklist per project.
 * **Rank tracking** and **AI visibility** (does ChatGPT, Claude, Gemini or Perplexity mention or cite you?): DataForSEO only, with a cost estimate before each run.
-* **Traffic:** which crawlers actually visit (GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, Googlebot…), the pages they read, the errors they get, and the people who click through from AI answers. It needs a small [collector](collector/) at your site's edge: a Cloudflare Worker route (works whatever the host, Cloudflare Pages included), Pages middleware, a Worker wrapper or a Next.js proxy. No IPs or cookies are collected. Needs sign-in.
+* **Traffic:** which crawlers actually visit (GPTBot, OAI-SearchBot, ClaudeBot, PerplexityBot, Googlebot…), the pages they read, the errors they get, and the people who click through from AI answers. It needs a small [collector](collector/) at your site's edge. On Cloudflare (DNS or Pages) it's one click: paste a pre-filled API token and MetaInfo deploys the collector worker and adds the routes. Elsewhere: a Worker wrapper, a Next.js proxy or the plain core, with your values filled in. No IPs or cookies are collected. Needs sign-in.
 
 **Integrate**
 
