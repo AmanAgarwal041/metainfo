@@ -18,6 +18,12 @@ export interface Project {
   location: number;
   keywords: string[];
   prompts: string[];
+  /** What you sell, in the words buyers use ("LLM observability platform"), for prompt ideas. */
+  category: string;
+  /** Who buys it ("AI engineers"), for prompt ideas. */
+  audience: string;
+  /** Other names AI answers use for the brand. */
+  aliases: string[];
   createdAt: string;
 }
 
@@ -48,6 +54,9 @@ export function blankProject(patch: Partial<Project> = {}): Project {
     location: patch.location ?? 2840,
     keywords: patch.keywords ?? [],
     prompts: patch.prompts ?? [],
+    category: patch.category ?? "",
+    audience: patch.audience ?? "",
+    aliases: patch.aliases ?? [],
     createdAt: new Date().toISOString(),
   };
 }
@@ -113,7 +122,10 @@ function clean(p: Project): Project {
     brand: p.brand.trim() || brandFromDomain(domain),
     competitors: [...new Set(p.competitors.map(bareDomain).filter((c) => c && c !== domain))].slice(0, 5),
     keywords: [...new Set(p.keywords.map((k) => k.trim().toLowerCase()).filter(Boolean))].slice(0, 500),
-    prompts: [...new Set(p.prompts.map((k) => k.trim()).filter(Boolean))].slice(0, 50),
+    prompts: [...new Set(p.prompts.map((k) => k.trim()).filter(Boolean))].slice(0, 100),
+    category: (p.category ?? "").trim().slice(0, 80),
+    audience: (p.audience ?? "").trim().slice(0, 80),
+    aliases: [...new Set((p.aliases ?? []).map((a) => a.trim()).filter(Boolean))].slice(0, 5),
   };
 }
 

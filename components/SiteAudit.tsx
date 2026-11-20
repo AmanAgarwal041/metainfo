@@ -1,38 +1,44 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { fromSiteFinding, fromTemplateIssue, type PromptContext } from "@/lib/fix-prompts";
 import { useProject } from "@/lib/project";
 import { toCsv } from "@/lib/research-client";
 import { auditPages, crawlSite, verifyJsPages, loadCrawlHistory, saveCrawl, summarize, type CrawlSnapshot, type PageAudit, type SiteFinding, type SiteSummary } from "@/lib/site-audit";
 import { Distribution } from "./charts";
 import { EmptyState, Kpi, PageHead } from "./kit";
 import { SortTable, useResearchStatus, type Column } from "./research/common";
+import { CollatedPrompt, FixPromptButton, PickBox, useFixPicker, type FixPicker } from "./FixPrompt";
 import { download, scoreColor, SeverityBadge } from "./ui";
 
 const LIMITS = [25, 50, 100, 200];
 
-function FindingRow({ f }: { f: SiteFinding }) {
+function FindingRow({ f, ctx, picker }: { f: SiteFinding; ctx: PromptContext; picker: FixPicker }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="check">
-      <button className="check-head" onClick={() => setOpen(!open)} aria-expanded={open}>
-        <span className={`status-icon ${f.severity === "critical" || f.severity === "high" ? "s-fail" : "s-warn"}`}>!</span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="row" style={{ gap: 6 }}>
-            <span className="check-title">{f.title}</span>
-            <SeverityBadge severity={f.severity} />
-            <span className="badge">{f.pages.length} {f.pages.length === 1 ? "page" : "pages"}</span>
+      <div className="check-pickable">
+        <PickBox id={f.id} title={f.title} picker={picker} />
+        <button className="check-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+          <span className={`status-icon ${f.severity === "critical" || f.severity === "high" ? "s-fail" : "s-warn"}`}>!</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="row" style={{ gap: 6 }}>
+              <span className="check-title">{f.title}</span>
+              <SeverityBadge severity={f.severity} />
+              <span className="badge">{f.pages.length} {f.pages.length === 1 ? "page" : "pages"}</span>
+            </div>
+            <div className="check-finding">{f.detail}</div>
           </div>
-          <div className="check-finding">{f.detail}</div>
-        </div>
-        <span className="muted" aria-hidden>{open ? "▴" : "▾"}</span>
-      </button>
+          <span className="muted" aria-hidden>{open ? "▴" : "▾"}</span>
+        </button>
+      </div>
       {open && (
         <div className="check-body">
           <div>
             <div className="label">How to fix</div>
             {f.fix}
+            <FixPromptButton fix={fromSiteFinding(f)} ctx={ctx} />
           </div>
           <div>
             <div className="label">Affected pages</div>
@@ -61,6 +67,10 @@ export default function SiteAudit() {
   const [phase, setPhase] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<SiteSummary | null>(null);
+  const picker = useFixPicker();
+  const ctx = useMemo<PromptContext>(() => ({ site: summary?.start ?? "the site", source: "site audit" }), [summary?.start]);
+  // Template issues first: one change in a shared layout fixes every page.
+  const fixes = useMemo(() => (summary ? [...summary.templateIssues.map(fromTemplateIssue), ...summary.findings.map(fromSiteFinding)] : []), [summary]);
   const [audits, setAudits] = useState<PageAudit[]>([]);
   const [history, setHistory] = useState<CrawlSnapshot[]>([]);
 
@@ -200,9 +210,10 @@ export default function SiteAudit() {
                 <span className="spacer" />
                 <button className="btn btn-sm" onClick={exportCsv}>Export CSV</button>
               </div>
+              <CollatedPrompt fixes={fixes} ctx={ctx} picker={picker} />
               {summary.findings.length ? (
                 <div className="check-list">
-                  {summary.findings.map((f) => <FindingRow key={f.id} f={f} />)}
+                  {summary.findings.map((f) => <FindingRow key={f.id} f={f} ctx={ctx} picker={picker} />)}
                 </div>
               ) : (
                 <div className="card empty">No site-wide problems found in the crawled pages.</div>
@@ -215,10 +226,12 @@ export default function SiteAudit() {
                 <p className="section-sub">These checks fail on most pages, so the cause is almost certainly a shared layout or component. One fix improves every page.</p>
                 <div className="list-rows">
                   {summary.templateIssues.map((t) => (
-                    <div className="list-row" key={t.checkId}>
+                    <div className="list-row" key={t.checkId} style={{ alignItems: "flex-start" }}>
+                      <PickBox id={`template:${t.checkId}`} title={t.title} picker={picker} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 600 }}>{t.title}</div>
                         <div className="muted small">{t.recommendation}</div>
+                        <FixPromptButton fix={fromTemplateIssue(t)} ctx={ctx} />
                       </div>
                       <SeverityBadge severity={t.severity} />
                       <span className="badge">{Math.round(t.share * 100)}% of pages</span>

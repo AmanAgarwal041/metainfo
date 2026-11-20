@@ -815,3 +815,18 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
 .ol-faq summary::after { content: "+"; color: var(--ol-faint); font-weight: 400; }
 .ol-faq details[open] summary::after { content: "−"; }
 .ol-faq .ol-help { margin: 0 0 12px; }
+
+/* Fix prompts (components/FixPrompt.tsx) */
+.fix-prompt { margin-top: 10px; }
+.fix-collate { border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); padding: 10px 12px; margin-bottom: 12px; }
+.prompt-box { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); cursor: auto; }
+.prompt-box-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+.prompt-box pre { margin: 0; padding: 10px 12px; max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 12px/1.5 var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
+.fix-pick { display: inline-flex; align-items: center; padding: 12px 0 0 12px; cursor: pointer; flex: none; }
+.fix-pick input { width: 15px; height: 15px; margin: 0; cursor: pointer; }
+.check-pickable { display: flex; align-items: flex-start; }
+.check-pickable > .check-head { flex: 1; min-width: 0; }
+.insight summary .fix-pick { padding: 3px 0 0; }
+.insight-head.has-pick { grid-template-columns: 20px 84px minmax(0, 1fr); }
+@media (max-width: 640px) { .insight-head.has-pick { grid-template-columns: 20px minmax(0, 1fr); } .insight-head.has-pick > .badge { grid-column: 2; } .insight-head.has-pick > div { grid-column: 2; } }
+.task .fix-pick, .list-row .fix-pick { padding: 3px 0 0; align-self: flex-start; }

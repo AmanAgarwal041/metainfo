@@ -370,3 +370,16 @@ export async function fetchPage(rawUrl: string, maxBytes = 200_000) {
     ms: Math.round(performance.now() - t0),
   };
 }
+
+/** Crawler ids whose user agent `fetchAs` can send (the ids in `crawlers.rs` and lib/traffic.ts). */
+export const BOT_IDS = Object.keys(BOT_UAS);
+
+/** A page fetched with a named crawler's user agent (or a browser's), for the AEO agent simulation. */
+export async function fetchAs(rawUrl: string, bot: string | "browser", maxBytes = 1_500_000) {
+  const target = normalizeUrl(rawUrl);
+  const ua = bot === "browser" ? BROWSER_UA : (BOT_UAS[bot] ?? CRAWLER_UA);
+  const r = await fetchFollow(target, { ua, maxBytes, accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5" });
+  const contentType = r.headers["content-type"] ?? "";
+  const html = r.bytes && /html|xml|text\/(plain|markdown)/i.test(contentType || "text/html") ? await decode(r.bytes, contentType) : "";
+  return { url: target.toString(), finalUrl: r.url, status: r.status, html, contentType };
+}

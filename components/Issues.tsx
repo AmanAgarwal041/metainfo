@@ -2,27 +2,33 @@
 
 import { useMemo, useState } from "react";
 import { PLATFORM_META, PLATFORMS, type Category, type Check, type Platform, type Report } from "@/lib/types";
+import { fromCheck, type PromptContext } from "@/lib/fix-prompts";
+import { CollatedPrompt, FixPromptButton, PickBox, useFixPicker, type FixPicker } from "./FixPrompt";
 import { CodeBlock, PlatformChips, SeverityBadge, StatusIcon } from "./ui";
 
 type StatusFilter = "issues" | "pass" | "info" | "all";
 const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
 const STATUS_ORDER = { fail: 0, warn: 1, pass: 2, info: 3 };
 
-export function CheckCard({ check, defaultOpen = false }: { check: Check; defaultOpen?: boolean }) {
+export function CheckCard({ check, defaultOpen = false, ctx, picker }: { check: Check; defaultOpen?: boolean; ctx?: PromptContext; picker?: FixPicker }) {
   const [open, setOpen] = useState(defaultOpen);
+  const fixable = check.status === "fail" || check.status === "warn";
   return (
     <div className="check">
-      <button className="check-head" onClick={() => setOpen(!open)} aria-expanded={open}>
-        <StatusIcon status={check.status} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="row" style={{ gap: 6 }}>
-            <span className="check-title">{check.title}</span>
-            {(check.status === "fail" || check.status === "warn") && <SeverityBadge severity={check.severity} />}
+      <div className="check-pickable">
+        {picker && fixable && <PickBox id={check.id} title={check.title} picker={picker} />}
+        <button className="check-head" onClick={() => setOpen(!open)} aria-expanded={open}>
+          <StatusIcon status={check.status} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="row" style={{ gap: 6 }}>
+              <span className="check-title">{check.title}</span>
+              {(check.status === "fail" || check.status === "warn") && <SeverityBadge severity={check.severity} />}
+            </div>
+            <div className="check-finding">{check.finding}</div>
           </div>
-          <div className="check-finding">{check.finding}</div>
-        </div>
-        <span className="muted" aria-hidden>{open ? "▴" : "▾"}</span>
-      </button>
+          <span className="muted" aria-hidden>{open ? "▴" : "▾"}</span>
+        </button>
+      </div>
       {open && (
         <div className="check-body">
           {check.recommendation && (
@@ -46,6 +52,7 @@ export function CheckCard({ check, defaultOpen = false }: { check: Check; defaul
             <span className="badge">effort: {check.effort}</span>
             <span className="badge mono">{check.id}</span>
           </div>
+          {ctx && fixable && <FixPromptButton fix={fromCheck(check)} ctx={ctx} />}
         </div>
       )}
     </div>
@@ -76,6 +83,11 @@ export default function Issues({
       .filter((c) => !needle || `${c.title} ${c.finding} ${c.id}`.toLowerCase().includes(needle))
       .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || SEV_ORDER[a.severity] - SEV_ORDER[b.severity]);
   }, [report.checks, status, platform, category, q]);
+
+  const picker = useFixPicker();
+  const ctx = useMemo<PromptContext>(() => ({ site: report.finalUrl || "this page", source: "page audit" }), [report.finalUrl]);
+  // Already in priority order: failures first, then by severity.
+  const fixes = useMemo(() => checks.filter((c) => c.status === "fail" || c.status === "warn").map(fromCheck), [checks]);
 
   const grouped = report.categories
     .map((cat) => ({ cat, items: checks.filter((c) => c.category === cat.category) }))
@@ -110,6 +122,7 @@ export default function Issues({
         <input className="input" style={{ height: 30, width: 200 }} placeholder="Search checks…" value={q} onChange={(e) => setQ(e.target.value)} />
         <span className="muted small">{checks.length} shown</span>
       </div>
+      <CollatedPrompt fixes={fixes} ctx={ctx} picker={picker} />
       {grouped.length === 0 && <div className="card empty">No checks match these filters.</div>}
       {grouped.map((g) => (
         <section key={g.cat.category} style={{ marginBottom: 20 }}>
@@ -118,7 +131,7 @@ export default function Issues({
           </h3>
           <div className="check-list">
             {g.items.map((c) => (
-              <CheckCard key={c.id} check={c} />
+              <CheckCard key={c.id} check={c} ctx={ctx} picker={picker} />
             ))}
           </div>
         </section>

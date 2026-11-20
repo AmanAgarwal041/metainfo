@@ -2,14 +2,19 @@
 
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { brandOf, loadRuns, matchBrand, rates, saveRun, suggestPrompts, topSources, type AiRun, type Observation } from "@/lib/ai-visibility";
+import { analyzeAnswer, type Answer, type BrandResult } from "@/lib/aeo";
+import { loadRuns, rates, saveRun, type AiRun, type Observation } from "@/lib/ai-visibility";
 import { loadSites, siteForDomain, type TrackedSite } from "@/lib/history";
 import { useProject } from "@/lib/project";
-import { research } from "@/lib/research-client";
+import { postResearch, research } from "@/lib/research-client";
 import { AI_ENGINES, type AiAnswer, type AiEngine } from "@/lib/research-types";
 import { LineChart } from "../charts";
 import { IconCheck } from "../icons";
-import { EmptyState, Kpi, PageHead } from "../kit";
+import { EmptyState, PageHead } from "../kit";
+import PromptManager from "../aeo/PromptManager";
+import { Citations, Opportunities, Overview, PromptTable } from "../aeo/Results";
+import { brandResults, brandsOf, SentimentBadge } from "../aeo/shared";
+import Simulator from "../aeo/Simulator";
 import { scoreColor } from "../ui";
 import { ErrorBox, ProviderNotice, useResearchStatus } from "./common";
 
@@ -21,15 +26,6 @@ function Highlight({ text, terms }: { text: string; terms: string[] }) {
   if (!t.length) return <>{text}</>;
   const parts = text.split(new RegExp(`(${t.map(esc).join("|")})`, "giu"));
   return <>{parts.map((p, i) => (t.some((x) => x.toLowerCase() === p.toLowerCase()) ? <mark key={i}>{p}</mark> : <Fragment key={i}>{p}</Fragment>))}</>;
-}
-
-function Cell({ o }: { o?: Observation }) {
-  if (!o) return <span className="na">.</span>;
-  if (o.error) return <span className="na" title={o.error}>error</span>;
-  if (!o.answered) return <span className="na">no answer</span>;
-  if (o.you.cited) return <span className="badge gain" title="Mentioned and cited"><IconCheck size={11} /> cited</span>;
-  if (o.you.mentioned) return <span className="badge accent">mentioned</span>;
-  return <span className="badge">absent</span>;
 }
 
 function Readiness({ site }: { site: TrackedSite | null }) {
@@ -75,19 +71,22 @@ function Readiness({ site }: { site: TrackedSite | null }) {
   );
 }
 
+type Tab = "overview" | "prompts" | "citations" | "opportunities" | "simulate";
+
 export default function AiVisibility() {
   const [project, update] = useProject();
   const status = useResearchStatus();
   const [runs, setRuns] = useState<AiRun[]>([]);
   const [site, setSite] = useState<TrackedSite | null>(null);
   const [engines, setEngines] = useState<Set<AiEngine>>(new Set(["google", "chatgpt", "perplexity", "claude", "gemini"]));
-  const [adding, setAdding] = useState("");
+  const [judge, setJudge] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [fatal, setFatal] = useState<unknown>(null);
-  const [tab, setTab] = useState<"prompts" | "competitors" | "sources">("prompts");
+  const [tab, setTab] = useState<Tab>("overview");
   const [viewing, setViewing] = useState<Observation | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [simulate, setSimulate] = useState<{ prompt: string; engine?: AiEngine; nonce: number } | null>(null);
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- browser-stored runs and audits for the active project */
@@ -96,18 +95,21 @@ export default function AiVisibility() {
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [project.id, project.domain]);
 
-  const brand = project.brand || brandOf(project.domain);
+  const brand = project.brand || project.name;
+  const brands = useMemo(() => brandsOf(project, brand), [project, brand]);
   const last = runs.at(-1);
-  const you = last ? rates(last.observations) : null;
+  const observations = useMemo(() => (last?.observations ?? []).map((o) => ({ ...o, brands: brandResults(o, brands) })), [last, brands]);
+  const answerList: Answer[] = observations;
   const engineList = AI_ENGINES.filter((e) => engines.has(e.id));
   const calls = project.prompts.length * engineList.length;
+  const llm = !!status?.llm;
 
   const run = async () => {
     setConfirm(false);
     setFatal(null);
     const jobs = project.prompts.flatMap((prompt) => engineList.map((e) => ({ prompt, engine: e.id })));
     setProgress({ done: 0, total: jobs.length });
-    const observations: Observation[] = [];
+    const out: Observation[] = [];
     const texts: Record<string, string> = {};
     let next = 0;
     let done = 0;
@@ -121,15 +123,20 @@ export default function AiVisibility() {
             const a = await research<AiAnswer>("ai", { engine: j.engine, prompt: j.prompt, loc: project.location });
             cost += a.cost;
             texts[`${j.engine}|${j.prompt}`] = a.text;
-            observations.push({
+            let br: BrandResult[] = analyzeAnswer(a.text, a.sources, brands, j.prompt);
+            if (judge && llm && a.text) {
+              br = await postResearch<BrandResult[]>("/api/aeo/judge", { text: a.text, sources: a.sources, brands, prompt: j.prompt }).catch(() => br);
+            }
+            out.push({
               prompt: j.prompt,
               engine: j.engine,
               model: a.model,
               answered: a.answered,
-              you: matchBrand(a, brand, project.domain),
-              competitors: Object.fromEntries(project.competitors.map((c) => [c, matchBrand(a, brandOf(c), c)])),
+              you: { mentioned: br[0].mentioned, cited: br[0].cited },
+              competitors: Object.fromEntries(br.slice(1).map((b) => [b.domain, { mentioned: b.mentioned, cited: b.cited }])),
               sources: a.sources,
               excerpt: a.text.slice(0, 1500),
+              brands: br,
             });
           } catch (e) {
             const code = (e as { code?: unknown }).code;
@@ -137,34 +144,31 @@ export default function AiVisibility() {
               stop = true;
               setFatal(e);
             }
-            observations.push({ prompt: j.prompt, engine: j.engine, model: "", answered: false, error: e instanceof Error ? e.message : String(e), you: { mentioned: false, cited: false }, competitors: {}, sources: [], excerpt: "" });
+            out.push({ prompt: j.prompt, engine: j.engine, model: "", answered: false, error: e instanceof Error ? e.message : String(e), you: { mentioned: false, cited: false }, competitors: {}, sources: [], excerpt: "" });
           }
           setProgress({ done: ++done, total: jobs.length });
         }
       }),
     );
-    if (observations.some((o) => !o.error)) {
-      setRuns(saveRun(project.id, { id: Math.random().toString(36).slice(2, 10), at: new Date().toISOString(), cost: Math.round(cost * 10000) / 10000, observations }));
+    if (out.some((o) => !o.error)) {
+      setRuns(saveRun(project.id, { id: Math.random().toString(36).slice(2, 10), at: new Date().toISOString(), cost: Math.round(cost * 10000) / 10000, observations: out }));
       setAnswers(texts);
+      setTab("overview");
     }
     setProgress(null);
   };
 
-  const competitorRows = useMemo(() => {
-    if (!last) return [];
-    return [
-      { name: brand || project.domain, domain: project.domain, you: true, r: rates(last.observations) },
-      ...project.competitors.map((c) => ({ name: brandOf(c), domain: c, you: false, r: rates(last.observations, (o) => o.competitors[c]) })),
-    ].sort((a, b) => b.r.mentionRate - a.r.mentionRate);
-  }, [last, brand, project.domain, project.competitors]);
-
-  const gaps = last ? last.observations.filter((o) => o.answered && !o.you.mentioned && Object.values(o.competitors).some((m) => m.mentioned)) : [];
+  const openSim = (prompt: string, engine?: AiEngine) => {
+    setSimulate({ prompt, engine, nonce: Date.now() });
+    setTab("simulate");
+  };
+  const terms = [brand, project.domain, ...project.aliases, ...brands.slice(1).map((b) => b.name)];
 
   return (
     <main className="shell">
       <PageHead
         title="AI visibility"
-        sub={`Whether ChatGPT, Claude, Perplexity, Gemini and Google AI Overviews mention or cite ${brand || "your brand"} when people ask the questions that matter.`}
+        sub={`How ChatGPT, Claude, Perplexity, Gemini and Google AI Overviews answer the questions your buyers ask: whether they name ${brand || "you"}, in what position and tone, which sources they trust, and what to change.`}
         actions={
           status?.dataforseo ? (
             <button className="btn btn-primary" disabled={!calls || !project.domain || !!progress} onClick={() => setConfirm(true)}>
@@ -181,57 +185,16 @@ export default function AiVisibility() {
         </section>
 
         {status && !status.dataforseo && (
-          <ProviderNotice unlocks="AI answer monitoring" free={<>Answers come from DataForSEO&apos;s AI Optimization API (live ChatGPT, Claude, Gemini and Perplexity responses with web search) and Google AI Overviews. You can set up prompts now.</>} />
+          <ProviderNotice
+            unlocks="AI answer monitoring"
+            free={<>Answers come from DataForSEO&apos;s AI Optimization API (live ChatGPT, Claude, Gemini and Perplexity responses with web search) and Google AI Overviews. You can set up prompts and simulate agents now.</>}
+          />
         )}
 
+        <PromptManager project={project} brand={brand} update={update} />
+
         <section className="card card-pad">
-          <div className="panel-head">
-            <div>
-              <h2 className="section-title">Prompts ({project.prompts.length})</h2>
-              <p className="section-sub" style={{ marginBottom: 0 }}>Questions your customers ask AI assistants. Neutral prompts that don&apos;t name your brand measure real visibility.</p>
-            </div>
-          </div>
-          <div className="row" style={{ marginBottom: 12, alignItems: "flex-end" }}>
-            <label className="pb-field" style={{ maxWidth: 220 }}>
-              <span>Brand name to detect</span>
-              <input key={project.id + brand} className="input" defaultValue={brand} onBlur={(e) => update({ brand: e.currentTarget.value })} />
-            </label>
-            <form
-              className="row"
-              style={{ flex: 1, minWidth: 260 }}
-              onSubmit={(e) => {
-                e.preventDefault();
-                const list = adding.split("\n").map((s) => s.trim()).filter(Boolean);
-                if (list.length) update({ prompts: [...project.prompts, ...list] });
-                setAdding("");
-              }}
-            >
-              <input className="input" style={{ flex: 1 }} placeholder="What is the best invoicing tool for freelancers?" value={adding} onChange={(e) => setAdding(e.target.value)} aria-label="New prompt" />
-              <button className="btn" type="submit" disabled={!adding.trim()}>Add prompt</button>
-            </form>
-          </div>
-          {project.prompts.length === 0 ? (
-            <div className="notice">
-              No prompts yet.{" "}
-              {suggestPrompts(project.keywords, brand, project.competitors).length > 0 ? (
-                <button className="btn btn-sm" onClick={() => update({ prompts: suggestPrompts(project.keywords, brand, project.competitors).slice(0, 10) })}>
-                  Add suggested prompts
-                </button>
-              ) : (
-                "Track some keywords or add competitors and suggestions will appear here."
-              )}
-            </div>
-          ) : (
-            <div className="chips" style={{ marginTop: 0 }}>
-              {project.prompts.map((p) => (
-                <span key={p} className="chip">
-                  {p}
-                  <button className="chip-x" aria-label={`Remove ${p}`} onClick={() => update({ prompts: project.prompts.filter((x) => x !== p) })}>×</button>
-                </span>
-              ))}
-            </div>
-          )}
-          <div className="row" style={{ marginTop: 14 }}>
+          <div className="row" style={{ flexWrap: "wrap" }}>
             <span className="small muted">Engines:</span>
             {AI_ENGINES.map((e) => (
               <button
@@ -248,6 +211,14 @@ export default function AiVisibility() {
                 <span className="dot" style={{ background: e.color }} /> {e.label}
               </button>
             ))}
+            <span className="spacer" />
+            {llm ? (
+              <label className="row small" style={{ gap: 6 }} title="Claude confirms which brands each answer really means and judges the tone. One extra Claude request per answer.">
+                <input type="checkbox" checked={judge} onChange={(e) => setJudge(e.currentTarget.checked)} /> Judge sentiment with Claude
+              </label>
+            ) : (
+              <span className="small muted" title="Set ANTHROPIC_API_KEY on the server to judge sentiment with Claude and to get written explanations in Simulate agents.">Sentiment: word lists (set ANTHROPIC_API_KEY for Claude)</span>
+            )}
           </div>
         </section>
 
@@ -255,7 +226,9 @@ export default function AiVisibility() {
           <div className="card card-pad row" role="alertdialog" aria-label="Confirm AI visibility check">
             <div style={{ flex: 1, minWidth: 240 }}>
               <b>Ask {engineList.length} engines {project.prompts.length} prompts ({calls} answers)?</b>
-              <div className="muted small">Each answer is a paid DataForSEO request; the exact cost is shown when the run finishes. Repeats within 12 hours are free.</div>
+              <div className="muted small">
+                Each answer is a paid DataForSEO request{judge && llm ? ", plus one Claude request to judge it" : ""}; the exact DataForSEO cost is shown when the run finishes. Repeats within 12 hours are free.
+              </div>
             </div>
             <button className="btn" onClick={() => setConfirm(false)}>Cancel</button>
             <button className="btn btn-primary" onClick={run}>Run check</button>
@@ -271,165 +244,90 @@ export default function AiVisibility() {
         )}
         <ErrorBox error={fatal} onRetry={run} />
 
-        {!last ? (
-          project.prompts.length > 0 && status?.dataforseo ? (
-            <div className="card">
-              <EmptyState title="No runs yet" body="Run a check to see which engines mention and cite you, and who they recommend instead." action={{ label: "Run check", onClick: () => setConfirm(true) }} />
-            </div>
-          ) : null
+        <div className="tabs" role="tablist">
+          {(
+            [
+              ["overview", "Overview"],
+              ["prompts", "Prompts"],
+              ["citations", "Citations"],
+              ["opportunities", "Opportunities"],
+              ["simulate", "Simulate agents"],
+            ] as [Tab, string][]
+          ).map(([id, label]) => (
+            <button key={id} className="tab" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "simulate" ? (
+          <Simulator project={project} brand={brand} observations={observations} llm={llm} initial={simulate} />
+        ) : !last ? (
+          <div className="card">
+            <EmptyState
+              title="No runs yet"
+              body={
+                status?.dataforseo
+                  ? "Run a check to see which engines name and cite you, in what position and tone, and who they recommend instead. Or simulate agents on a prompt for free."
+                  : "Answer monitoring needs DataForSEO. Meanwhile, Simulate agents scores your pages against any prompt for free."
+              }
+              action={status?.dataforseo && project.prompts.length ? { label: "Run check", onClick: () => setConfirm(true) } : { label: "Simulate agents", onClick: () => setTab("simulate") }}
+            />
+          </div>
         ) : (
           <>
-            <div className="kpi-row">
-              <Kpi label="Mentioned" value={`${you!.mentionRate}%`} foot={`of ${you!.answered} answers on ${fmt(last.at)}`} />
-              <Kpi label="Cited as a source" value={`${you!.citationRate}%`} foot="Answers linking to your domain" />
-              <Kpi label="Competitor gaps" value={gaps.length} foot="Answers naming a competitor but not you" tone={gaps.length ? "var(--warn)" : undefined} />
-              <Kpi label="Run cost" value={`$${last.cost.toFixed(3)}`} foot={`${last.observations.length} requests`} />
-            </div>
-
-            {runs.length > 1 && (
+            <p className="muted small" style={{ margin: 0 }}>
+              Last run {fmt(last.at)}: {last.observations.length} answers, ${last.cost.toFixed(3)}.
+              {observations.some((o) => o.brands?.some((b) => b.judgedBy === "llm")) ? " Sentiment judged by Claude." : " Sentiment from word lists."}
+            </p>
+            {tab === "overview" && (
+              <>
+                <Overview answers={answerList} brands={brands} brand={brand} />
+                {runs.length > 1 && (
+                  <section className="card card-pad">
+                    <h2 className="section-title">Visibility over time</h2>
+                    <div style={{ marginTop: 10 }}>
+                      <LineChart
+                        ariaLabel="Mention rate by engine over time"
+                        x={runs.map((r) => fmt(r.at))}
+                        yDomain={[0, 100]}
+                        format={(n) => `${n}%`}
+                        series={AI_ENGINES.map((e) => ({
+                          id: e.id,
+                          label: e.label,
+                          color: e.color,
+                          values: runs.map((r) => {
+                            const x = rates(r.observations.filter((o) => o.engine === e.id));
+                            return x.answered ? x.mentionRate : null;
+                          }),
+                        }))}
+                      />
+                    </div>
+                  </section>
+                )}
+              </>
+            )}
+            {tab === "prompts" && (
               <section className="card card-pad">
-                <h2 className="section-title">Mention rate over time</h2>
-                <div style={{ marginTop: 10 }}>
-                  <LineChart
-                    ariaLabel="Mention rate by engine over time"
-                    x={runs.map((r) => fmt(r.at))}
-                    yDomain={[0, 100]}
-                    format={(n) => `${n}%`}
-                    series={AI_ENGINES.map((e) => ({
-                      id: e.id,
-                      label: e.label,
-                      color: e.color,
-                      values: runs.map((r) => {
-                        const x = rates(r.observations.filter((o) => o.engine === e.id));
-                        return x.answered ? x.mentionRate : null;
-                      }),
-                    }))}
-                  />
-                </div>
+                <PromptTable observations={observations} brand={brand} brands={brands} onOpen={setViewing} />
+              </section>
+            )}
+            {tab === "citations" && (
+              <section className="card card-pad">
+                <h2 className="section-title">Which sources AI answers trust</h2>
+                <p className="section-sub">Every page the engines cited, by type. Click a type to filter. Sources that cite competitors but not you are where to earn mentions.</p>
+                <Citations answers={answerList} brands={brands} />
+              </section>
+            )}
+            {tab === "opportunities" && (
+              <section className="card card-pad">
+                <h2 className="section-title">What to do next</h2>
+                <p className="section-sub">From where competitors are named and you aren&apos;t, what gets cited, and how you&apos;re described. Most impactful first.</p>
+                <Opportunities answers={answerList} brands={brands} brand={brand} domain={project.domain} onSimulate={(p) => openSim(p)} />
               </section>
             )}
 
-            <section className="card card-pad">
-              <div className="panel-head">
-                <div className="segmented" role="group" aria-label="Results view">
-                  {(["prompts", "competitors", "sources"] as const).map((t) => (
-                    <button key={t} aria-pressed={tab === t} onClick={() => setTab(t)}>
-                      {t === "prompts" ? "Prompts" : t === "competitors" ? "Competitors" : "Cited sources"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {tab === "prompts" && (
-                <div className="table-wrap">
-                  <table className="t">
-                    <thead>
-                      <tr>
-                        <th>Prompt</th>
-                        {AI_ENGINES.filter((e) => last.observations.some((o) => o.engine === e.id)).map((e) => (
-                          <th key={e.id}>
-                            <span className="row" style={{ gap: 6 }}><span className="dot" style={{ background: e.color }} />{e.label}</span>
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[...new Set(last.observations.map((o) => o.prompt))].map((p) => (
-                        <tr key={p}>
-                          <td style={{ maxWidth: 320 }}>{p}</td>
-                          {AI_ENGINES.filter((e) => last.observations.some((o) => o.engine === e.id)).map((e) => {
-                            const o = last.observations.find((x) => x.prompt === p && x.engine === e.id);
-                            return (
-                              <td key={e.id}>
-                                <button className="btn-ghost" style={{ border: 0, background: "none", padding: 0, cursor: o?.answered ? "pointer" : "default" }} onClick={() => o?.answered && setViewing(o)} aria-label={`View ${e.label} answer`}>
-                                  <Cell o={o} />
-                                </button>
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {tab === "competitors" && (
-                <>
-                  <div className="table-wrap">
-                    <table className="t">
-                      <thead>
-                        <tr>
-                          <th>Brand</th>
-                          <th>Mentioned in</th>
-                          <th style={{ width: "36%" }} />
-                          <th style={{ textAlign: "right" }}>Cited in</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {competitorRows.map((c) => (
-                          <tr key={c.domain}>
-                            <td>
-                              {c.name} <span className="muted small">{c.domain}</span> {c.you && <span className="badge accent">you</span>}
-                            </td>
-                            <td><b>{c.r.mentionRate}%</b></td>
-                            <td style={{ verticalAlign: "middle" }}><div className="bar"><span style={{ width: `${c.r.mentionRate}%`, background: c.you ? "var(--accent)" : "var(--text-3)" }} /></div></td>
-                            <td style={{ textAlign: "right" }}>{c.r.citationRate}%</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {project.competitors.length === 0 && <p className="muted small" style={{ marginTop: 8 }}>Add competitors in the project to compare share of mentions.</p>}
-                  {gaps.length > 0 && (
-                    <div style={{ marginTop: 16 }}>
-                      <h3 className="section-title">Where competitors win</h3>
-                      <div className="list-rows">
-                        {gaps.slice(0, 12).map((o) => (
-                          <div className="list-row" key={o.engine + o.prompt}>
-                            <span style={{ flex: 1 }}>{o.prompt}</span>
-                            <span className="muted small">{AI_ENGINES.find((e) => e.id === o.engine)?.label}</span>
-                            <span className="small">{Object.entries(o.competitors).filter(([, m]) => m.mentioned).map(([c]) => brandOf(c)).join(", ")}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-
-              {tab === "sources" && (
-                <div className="table-wrap">
-                  <table className="t">
-                    <thead>
-                      <tr>
-                        <th>Domain</th>
-                        <th style={{ textAlign: "right" }}>Answers citing it</th>
-                        <th style={{ textAlign: "right" }}>Prompts</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {topSources(last.observations).map((s) => {
-                        const mine = project.domain && (s.domain === project.domain || s.domain.endsWith(`.${project.domain}`));
-                        const comp = project.competitors.find((c) => s.domain === c || s.domain.endsWith(`.${c}`));
-                        return (
-                          <tr key={s.domain}>
-                            <td>
-                              {s.domain} {mine && <span className="badge accent">you</span>} {comp && <span className="badge">competitor</span>}
-                            </td>
-                            <td style={{ textAlign: "right" }}><b>{s.answers}</b></td>
-                            <td style={{ textAlign: "right" }}>{s.prompts}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                  <p className="muted small" style={{ marginTop: 8 }}>Sites cited again and again (review sites, forums, list articles) are where to earn mentions.</p>
-                </div>
-              )}
-            </section>
-
-            {viewing && (
+            {viewing && tab === "prompts" && (
               <section className="card card-pad">
                 <div className="panel-head">
                   <div>
@@ -437,11 +335,28 @@ export default function AiVisibility() {
                     <p className="section-sub" style={{ marginBottom: 0 }}>Model: {viewing.model}. Highlighted: your brand and competitors.</p>
                   </div>
                   <span className="spacer" />
+                  <button className="btn btn-sm btn-primary" onClick={() => openSim(viewing.prompt, viewing.engine)}>Simulate agents</button>
                   <button className="btn btn-sm" onClick={() => setViewing(null)}>Close</button>
                 </div>
+                {viewing.brands && (
+                  <div className="list-rows" style={{ margin: "10px 0" }}>
+                    {viewing.brands.filter((b) => b.mentioned || b.cited).sort((a, b) => (a.position ?? 99) - (b.position ?? 99)).map((b) => (
+                      <div className="list-row" key={b.domain} style={{ alignItems: "flex-start" }}>
+                        <span className="mono small" style={{ width: 28 }}>{b.position ? `#${b.position}` : "–"}</span>
+                        <span style={{ width: 140 }}>
+                          <b>{brands.find((x) => x.domain === b.domain)?.name}</b> {b.domain === project.domain && <span className="badge accent">you</span>}
+                        </span>
+                        <span style={{ width: 150 }} className="row">
+                          <SentimentBadge s={b.sentiment} /> {b.cited && <span className="badge gain">cited</span>}
+                        </span>
+                        <span className="muted small" style={{ flex: 1 }}>{b.quote}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {(answers[`${viewing.engine}|${viewing.prompt}`] ?? viewing.excerpt) ? (
                   <div className="answer">
-                    <Highlight text={answers[`${viewing.engine}|${viewing.prompt}`] ?? viewing.excerpt} terms={[brand, project.domain, ...project.competitors.map(brandOf)]} />
+                    <Highlight text={answers[`${viewing.engine}|${viewing.prompt}`] ?? viewing.excerpt} terms={terms} />
                   </div>
                 ) : (
                   <p className="muted">This engine returned sources without answer text (Google AI Overviews show citations only here).</p>
