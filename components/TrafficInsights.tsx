@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { fromInsight, type PromptContext } from "@/lib/fix-prompts";
 import type { TrafficStats } from "@/lib/traffic";
 import { AREA_LABEL, openCount, trafficInsights, type Insight, type InsightArea, type InsightLevel } from "@/lib/traffic-insights";
+import { CollatedPrompt, FixPromptButton, PickBox, useFixPicker, type FixPicker } from "./FixPrompt";
 
 // "What to improve": the traffic read as a to-do list, for AI visibility, people, and errors.
 
 const AREAS: InsightArea[] = ["ai", "people", "errors"];
+const RANK: Record<InsightLevel, number> = { high: 0, medium: 1, low: 2, good: 3 };
 const LEVEL: Record<InsightLevel, { label: string; cls: string }> = {
   high: { label: "Fix first", cls: "s-fail" },
   medium: { label: "Worth doing", cls: "s-warn" },
@@ -20,11 +23,22 @@ export default function TrafficInsights({ stats, domain, statusKnown }: { stats:
   // Open on the area with the most urgent item.
   const [area, setArea] = useState<InsightArea>(() => insights.find((i) => i.level !== "good")?.area ?? "ai");
   const shown = insights.filter((i) => i.area === area);
+  const picker = useFixPicker();
+  const ctx = useMemo<PromptContext>(() => ({ site: domain ? `https://${domain}` : "the site", source: `traffic report (last ${stats.days} days)` }), [domain, stats.days]);
+  const fixes = useMemo(
+    () =>
+      insights
+        .filter((i) => i.level !== "good" && i.steps.length)
+        .sort((a, b) => RANK[a.level] - RANK[b.level])
+        .map(fromInsight),
+    [insights],
+  );
 
   return (
     <div className="card card-pad">
       <h3 className="section-title">What to improve</h3>
       <p className="section-sub">Read from the last {stats.days} days of traffic. Each item says what the numbers show and what to change.</p>
+      <CollatedPrompt fixes={fixes} ctx={ctx} picker={picker} />
       <div className="tabs" role="tablist" style={{ marginBottom: 8 }}>
         {AREAS.map((a) => {
           const c = openCount(insights, a);
@@ -38,18 +52,20 @@ export default function TrafficInsights({ stats, domain, statusKnown }: { stats:
       </div>
       <div>
         {shown.map((i, k) => (
-          <InsightRow key={i.id} insight={i} open={k === 0 && i.level !== "good"} />
+          <InsightRow key={i.id} insight={i} open={k === 0 && i.level !== "good"} ctx={ctx} picker={picker} />
         ))}
       </div>
     </div>
   );
 }
 
-function InsightRow({ insight: i, open }: { insight: Insight; open: boolean }) {
+function InsightRow({ insight: i, open, ctx, picker }: { insight: Insight; open: boolean; ctx: PromptContext; picker: FixPicker }) {
   const lv = LEVEL[i.level];
   const more = i.steps.length > 0 || !!i.paths?.length;
+  const fixable = i.level !== "good" && i.steps.length > 0;
   const head = (
-    <div className="insight-head">
+    <div className={`insight-head${fixable ? " has-pick" : ""}`}>
+      {fixable && <PickBox id={i.id} title={i.title} picker={picker} />}
       <span className={`badge ${lv.cls}`}>{lv.label}</span>
       <div>
         <div className="task-title">{i.title}</div>
@@ -90,6 +106,7 @@ function InsightRow({ insight: i, open }: { insight: Insight; open: boolean }) {
               {i.action.label} →
             </Link>
           ))}
+        {fixable && <FixPromptButton fix={fromInsight(i)} ctx={ctx} />}
       </div>
     </details>
   );

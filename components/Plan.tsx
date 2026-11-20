@@ -1,9 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { fromCheck, type Fix, type PromptContext } from "@/lib/fix-prompts";
 import { setTaskState, type TaskState, type TrackedSite } from "@/lib/history";
 import { PLATFORM_META, type PlanTask, type Platform, type Report } from "@/lib/types";
+import { CollatedPrompt, FixPromptButton, PickBox, useFixPicker, type FixPicker } from "./FixPrompt";
 import { CodeBlock, CopyButton, download, PlatformChips, scoreColor, SeverityBadge } from "./ui";
+
+function taskFix(task: PlanTask, report: Report): Fix {
+  const check = report.checks.find((c) => c.id === task.checkId);
+  return check ? fromCheck(check) : { id: task.checkId, title: task.title, kind: task.category === "content" ? "content" : "code", change: task.recommendation };
+}
 
 const STATE_LABEL: Record<TaskState, string> = { todo: "To do", doing: "In progress", done: "Done", skipped: "Won't fix" };
 
@@ -30,43 +37,52 @@ function TaskRow({
   report,
   state,
   onState,
+  ctx,
+  picker,
 }: {
   task: PlanTask;
   report: Report;
   state: TaskState;
   onState?: (s: TaskState) => void;
+  ctx: PromptContext;
+  picker: FixPicker;
 }) {
   const [open, setOpen] = useState(false);
   const check = report.checks.find((c) => c.id === task.checkId);
+  const closed = state === "done" || state === "skipped";
   return (
-    <div className={`task ${state === "done" || state === "skipped" ? "is-done" : ""}`}>
-      <div style={{ minWidth: 0 }}>
-        <button className="btn-ghost" style={{ border: 0, background: "none", padding: 0, cursor: "pointer", textAlign: "left" }} onClick={() => setOpen(!open)}>
-          <span className="task-title">{task.title}</span> <span className="muted small">{open ? "▴" : "▾"}</span>
-        </button>
-        <div className="task-rec">{task.recommendation}</div>
-        <div className="task-meta">
-          <SeverityBadge severity={task.severity} />
-          <span className="badge">effort: {task.effort}</span>
-          <span className="badge gain">+{task.totalGain.toFixed(1)} pts</span>
-          <PlatformChips platforms={task.platforms} />
+    <div className={`task ${closed ? "is-done" : ""}`}>
+      <div style={{ minWidth: 0, display: "flex", gap: 10 }}>
+        {!closed && <PickBox id={task.checkId} title={task.title} picker={picker} />}
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <button className="btn-ghost" style={{ border: 0, background: "none", padding: 0, cursor: "pointer", textAlign: "left" }} onClick={() => setOpen(!open)}>
+            <span className="task-title">{task.title}</span> <span className="muted small">{open ? "▴" : "▾"}</span>
+          </button>
+          <div className="task-rec">{task.recommendation}</div>
+          <div className="task-meta">
+            <SeverityBadge severity={task.severity} />
+            <span className="badge">effort: {task.effort}</span>
+            <span className="badge gain">+{task.totalGain.toFixed(1)} pts</span>
+            <PlatformChips platforms={task.platforms} />
+          </div>
+          {state === "done" && (
+            <div className="small" style={{ color: "var(--warn)", marginTop: 6 }}>
+              Marked done, but the latest scan still flags it. Rescan after deploying to verify.
+            </div>
+          )}
+          {open && check && (
+            <div style={{ marginTop: 10 }} className="grid">
+              <div className="small">
+                <b>Found:</b> <span className="muted">{check.finding}</span>
+              </div>
+              <div className="small">
+                <b>Why:</b> <span className="muted">{check.why}</span>
+              </div>
+              {check.snippet && <CodeBlock code={check.snippet} />}
+            </div>
+          )}
+          {open && !closed && <FixPromptButton fix={taskFix(task, report)} ctx={ctx} />}
         </div>
-        {state === "done" && (
-          <div className="small" style={{ color: "var(--warn)", marginTop: 6 }}>
-            Marked done, but the latest scan still flags it. Rescan after deploying to verify.
-          </div>
-        )}
-        {open && check && (
-          <div style={{ marginTop: 10 }} className="grid">
-            <div className="small">
-              <b>Found:</b> <span className="muted">{check.finding}</span>
-            </div>
-            <div className="small">
-              <b>Why:</b> <span className="muted">{check.why}</span>
-            </div>
-            {check.snippet && <CodeBlock code={check.snippet} />}
-          </div>
-        )}
       </div>
       {onState && (
         <select className="select" value={state} onChange={(e) => onState(e.target.value as TaskState)} aria-label={`Status of ${task.title}`}>
@@ -96,6 +112,9 @@ export default function Plan({ report, site, onSiteChange }: { report: Report; s
         .filter(([id, t]) => t.state === "done" && report.checks.find((c) => c.id === id)?.status === "pass")
         .map(([id, t]) => ({ id, at: t.updatedAt, title: report.checks.find((c) => c.id === id)?.title ?? id }))
     : [];
+  const picker = useFixPicker();
+  const ctx = useMemo<PromptContext>(() => ({ site: report.finalUrl || "this page", source: "fix plan" }), [report.finalUrl]);
+  const openFixes = all.filter((t) => !["done", "skipped"].includes(stateOf(t.checkId))).map((t) => taskFix(t, report));
   const handled = all.filter((t) => ["done", "skipped"].includes(stateOf(t.checkId))).length;
   const totalTracked = all.length + verified.length;
   const resolved = handled + verified.length;
@@ -138,6 +157,9 @@ export default function Plan({ report, site, onSiteChange }: { report: Report; s
             </div>
           ))}
         </div>
+        <div style={{ marginTop: 14 }}>
+          <CollatedPrompt fixes={openFixes} ctx={ctx} picker={picker} />
+        </div>
         {!site && <div className="notice" style={{ marginTop: 12 }}>Scan a URL (not pasted HTML) to track task status across scans.</div>}
       </div>
 
@@ -154,7 +176,7 @@ export default function Plan({ report, site, onSiteChange }: { report: Report; s
             <p className="section-sub" style={{ marginBottom: 8 }}>{phase.description}</p>
             <div className="card">
               {phase.tasks.map((t) => (
-                <TaskRow key={t.checkId} task={t} report={report} state={stateOf(t.checkId)} onState={site ? (s) => update(t.checkId, s) : undefined} />
+                <TaskRow key={t.checkId} task={t} report={report} ctx={ctx} picker={picker} state={stateOf(t.checkId)} onState={site ? (s) => update(t.checkId, s) : undefined} />
               ))}
             </div>
           </section>

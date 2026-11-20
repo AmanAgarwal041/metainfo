@@ -72,6 +72,14 @@ export async function research<T>(path: string, params: Record<string, string | 
   return body as T;
 }
 
+/** POST to an app API that's gated like research (access token, own keys), e.g. /api/aeo/simulate. */
+export async function postResearch<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(url, { method: "POST", headers: { ...authHeaders(), "content-type": "application/json" }, body: JSON.stringify(body), signal });
+  const out = await res.json().catch(() => ({ error: `Request failed (HTTP ${res.status})` }));
+  if (!res.ok || out.error) throw new ResearchError(out.error ?? `HTTP ${res.status}`, out.code);
+  return out as T;
+}
+
 export function researchStatus(): Promise<ResearchStatus> {
   statusPromise ??= fetch("/api/research/status")
     .then((r) => r.json() as Promise<ResearchStatus>)

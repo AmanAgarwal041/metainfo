@@ -5,6 +5,7 @@
 // "mentioned" = the brand name or domain appears as a whole word in the
 // answer (URLs masked); "cited" = a source URL is on the brand's domain.
 
+import type { BrandResult } from "@/lib/aeo";
 import type { AiAnswer, AiEngine } from "@/lib/research-types";
 import { setLocal } from "@/lib/store";
 
@@ -23,6 +24,8 @@ export interface Observation {
   competitors: Record<string, Match>;
   sources: { url: string; domain: string; title: string }[];
   excerpt: string;
+  /** Per brand (you first): mention, citation, position in the answer, sentiment and the quote behind it. */
+  brands?: BrandResult[];
 }
 
 export interface AiRun {
