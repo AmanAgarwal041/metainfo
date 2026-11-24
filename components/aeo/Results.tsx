@@ -134,11 +134,14 @@ export function PromptTable({
   brand,
   brands,
   onOpen,
+  onReport,
 }: {
   observations: Observation[];
   brand: string;
   brands: Brand[];
   onOpen: (o: Observation) => void;
+  /** Open the prompt's report: every engine side by side, and what to do. */
+  onReport?: (prompt: string) => void;
 }) {
   const [stage, setStage] = useState<Stage | "all">("all");
   const engines = AI_ENGINES.filter((e) => observations.some((o) => o.engine === e.id));
@@ -171,7 +174,14 @@ export function PromptTable({
               <tr key={p}>
                 <td style={{ maxWidth: 320 }}>
                   {p}
-                  <div style={{ marginTop: 4 }}><TypeBadge type={classifyPrompt(p, brand)} /></div>
+                  <div className="row" style={{ marginTop: 4, gap: 8 }}>
+                    <TypeBadge type={classifyPrompt(p, brand)} />
+                    {onReport && (
+                      <button className="link-btn small" onClick={() => onReport(p)}>
+                        Compare and improve
+                      </button>
+                    )}
+                  </div>
                 </td>
                 {engines.map((e) => {
                   const o = observations.find((x) => x.prompt === p && x.engine === e.id);
@@ -217,7 +227,7 @@ export function PromptTable({
 export function Citations({ answers, brands }: { answers: Answer[]; brands: Brand[] }) {
   const you = brands[0].domain;
   const comps = brands.slice(1).map((b) => b.domain);
-  const rows = citationTable(answers, you, comps);
+  const rows = citationTable(answers, you, comps, brands);
   const [type, setType] = useState<SourceType | "all">("all");
   const totals = new Map<SourceType, number>();
   for (const r of rows) totals.set(r.type, (totals.get(r.type) ?? 0) + r.answers);

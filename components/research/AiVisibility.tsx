@@ -14,6 +14,7 @@ import { EmptyState, PageHead } from "../kit";
 import PromptManager from "../aeo/PromptManager";
 import { Citations, Opportunities, Overview, PromptTable } from "../aeo/Results";
 import { brandResults, brandsOf, SentimentBadge } from "../aeo/shared";
+import PromptReport from "../aeo/PromptReport";
 import Simulator from "../aeo/Simulator";
 import { scoreColor } from "../ui";
 import { ErrorBox, ProviderNotice, useResearchStatus } from "./common";
@@ -71,7 +72,7 @@ function Readiness({ site }: { site: TrackedSite | null }) {
   );
 }
 
-type Tab = "overview" | "prompts" | "citations" | "opportunities" | "simulate";
+type Tab = "overview" | "prompts" | "by-prompt" | "citations" | "opportunities" | "simulate";
 
 export default function AiVisibility() {
   const [project, update] = useProject();
@@ -87,6 +88,7 @@ export default function AiVisibility() {
   const [viewing, setViewing] = useState<Observation | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [simulate, setSimulate] = useState<{ prompt: string; engine?: AiEngine; nonce: number } | null>(null);
+  const [report, setReport] = useState<{ prompt: string; nonce: number } | null>(null);
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- browser-stored runs and audits for the active project */
@@ -100,6 +102,8 @@ export default function AiVisibility() {
   const last = runs.at(-1);
   const observations = useMemo(() => (last?.observations ?? []).map((o) => ({ ...o, brands: brandResults(o, brands) })), [last, brands]);
   const answerList: Answer[] = observations;
+  const prev = runs.at(-2);
+  const previous = useMemo<Answer[]>(() => (prev?.observations ?? []).map((o) => ({ ...o, brands: brandResults(o, brands) })), [prev, brands]);
   const engineList = AI_ENGINES.filter((e) => engines.has(e.id));
   const calls = project.prompts.length * engineList.length;
   const llm = !!status?.llm;
@@ -161,6 +165,10 @@ export default function AiVisibility() {
   const openSim = (prompt: string, engine?: AiEngine) => {
     setSimulate({ prompt, engine, nonce: Date.now() });
     setTab("simulate");
+  };
+  const openReport = (prompt: string) => {
+    setReport({ prompt, nonce: Date.now() });
+    setTab("by-prompt");
   };
   const terms = [brand, project.domain, ...project.aliases, ...brands.slice(1).map((b) => b.name)];
 
@@ -249,6 +257,7 @@ export default function AiVisibility() {
             [
               ["overview", "Overview"],
               ["prompts", "Prompts"],
+              ["by-prompt", "By prompt"],
               ["citations", "Citations"],
               ["opportunities", "Opportunities"],
               ["simulate", "Simulate agents"],
@@ -309,7 +318,12 @@ export default function AiVisibility() {
             )}
             {tab === "prompts" && (
               <section className="card card-pad">
-                <PromptTable observations={observations} brand={brand} brands={brands} onOpen={setViewing} />
+                <PromptTable observations={observations} brand={brand} brands={brands} onOpen={setViewing} onReport={openReport} />
+              </section>
+            )}
+            {tab === "by-prompt" && (
+              <section className="card card-pad">
+                <PromptReport answers={answerList} previous={previous} brands={brands} brand={brand} domain={project.domain} initial={report} onSimulate={openSim} />
               </section>
             )}
             {tab === "citations" && (

@@ -830,3 +830,19 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
 .insight-head.has-pick { grid-template-columns: 20px 84px minmax(0, 1fr); }
 @media (max-width: 640px) { .insight-head.has-pick { grid-template-columns: 20px minmax(0, 1fr); } .insight-head.has-pick > .badge { grid-column: 2; } .insight-head.has-pick > div { grid-column: 2; } }
 .task .fix-pick, .list-row .fix-pick { padding: 3px 0 0; align-self: flex-start; }
+
+/* AI visibility → By prompt: prompt list on the left, the selected prompt's report on the right. */
+.prompt-report { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 22px; align-items: start; }
+.prompt-report-list { position: sticky; top: 12px; max-height: calc(100vh - 40px); overflow-y: auto; }
+.prompt-pick { width: 100%; border: 0; background: none; text-align: left; cursor: pointer; padding: 8px 10px; border-radius: 8px; color: inherit; font: inherit; }
+.prompt-pick + .prompt-pick { margin-top: 2px; }
+.prompt-pick:hover { background: var(--surface-2); }
+.prompt-pick[aria-pressed="true"] { background: var(--accent-soft); }
+.prompt-pick-text { display: block; font-size: 13px; line-height: 1.35; }
+.t tr.is-mine td { background: var(--accent-soft); }
+@media (max-width: 900px) {
+  .prompt-report { grid-template-columns: minmax(0, 1fr); }
+  .prompt-report-list { position: static; max-height: 280px; }
+}
+.link-btn { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
+.link-btn:hover { text-decoration: underline; }

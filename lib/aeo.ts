@@ -156,7 +156,7 @@ function clauseFor(sentence: string, mine: string[], all: string[]): string {
 }
 
 /** Which brands an answer names, in what order, how it describes them, and whether it cites them. */
-export function analyzeAnswer(text: string, sources: { domain: string }[], brands: Brand[], prompt = ""): BrandResult[] {
+export function analyzeAnswer(text: string, sources: { domain: string; url?: string }[], brands: Brand[], prompt = ""): BrandResult[] {
   const masked = text.replace(/https?:\/\/\S+/g, " ").replace(/\S+@\S+\.\S+/g, " ");
   const sents = sentences(text);
   const firstAt = brands.map((b) => {
@@ -172,8 +172,7 @@ export function analyzeAnswer(text: string, sources: { domain: string }[], brand
   const order = firstAt.filter((x) => x.at >= 0 && !inPrompt(x.terms)).sort((a, b) => a.at - b.at);
   const allTerms = firstAt.flatMap((x) => x.terms);
   return firstAt.map(({ b, at, terms }) => {
-    const d = b.domain.toLowerCase();
-    const cited = !!d && sources.some((s) => s.domain === d || s.domain.endsWith(`.${d}`));
+    const cited = !!b.domain && citesBrand(sources, b, brands);
     const about = sents.filter((s) => terms.some((t) => termRe(t).test(s)));
     // In a sentence naming several brands, only the words from this brand up to the next one describe it.
     const clauses = about.map((s) => clauseFor(s, terms, allTerms));
@@ -218,7 +217,85 @@ const BLOG = /(^|\.)(medium\.com|dev\.to|substack\.com|hashnode\.dev|hackernoon\
 
 const onDomain = (host: string, d: string) => host === d || host.endsWith(`.${d}`);
 
-export function classifySource(host: string, you: string, competitors: string[]): SourceType {
+// ------------------------------------------------------- brand-owned profiles
+
+/** Sites where a brand has its own account, and which part of the URL names the account. */
+const PROFILE_PATHS: Record<string, (seg: string[]) => string | undefined> = {
+  "github.com": (s) => s[0],
+  "gitlab.com": (s) => s[0],
+  "huggingface.co": (s) => (s[0] === "spaces" || s[0] === "datasets" ? s[1] : s[0]),
+  "x.com": (s) => s[0],
+  "twitter.com": (s) => s[0],
+  "bsky.app": (s) => (s[0] === "profile" ? s[1]?.split(".")[0] : undefined),
+  "linkedin.com": (s) => (["company", "showcase", "school"].includes(s[0]) ? s[1] : undefined),
+  "youtube.com": (s) => (s[0]?.startsWith("@") ? s[0].slice(1) : s[0] === "c" || s[0] === "user" ? s[1] : undefined),
+  "medium.com": (s) => (s[0]?.startsWith("@") ? s[0].slice(1) : s[0]),
+  "dev.to": (s) => s[0],
+  "reddit.com": (s) => (s[0] === "r" ? s[1] : undefined),
+  "npmjs.com": (s) => (s[0] === "package" ? (s[1]?.startsWith("@") ? s[1].slice(1) : s[1]) : s[0] === "org" ? s[1] : undefined),
+  "pypi.org": (s) => (s[0] === "project" ? s[1] : undefined),
+  "crates.io": (s) => (s[0] === "crates" ? s[1] : undefined),
+  "hub.docker.com": (s) => (s[0] === "r" || s[0] === "u" ? s[1] : undefined),
+  "discord.com": () => undefined,
+};
+/** Hosts where the account is the subdomain: openlit.github.io, openlit.substack.com. */
+const PROFILE_SUBDOMAINS = ["github.io", "gitlab.io", "readthedocs.io", "gitbook.io", "substack.com", "medium.com", "hashnode.dev", "mintlify.app"];
+/** Common handle suffixes: github.com/Arize-ai is Arize's. */
+const HANDLE_SUFFIX = /(hq|ai|io|dev|app|labs|inc|team|official|oss)$/;
+
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+function handlesOf(b: Brand): Set<string> {
+  const label = b.domain.split(".")[0] ?? "";
+  return new Set([b.name, label, b.domain, ...(b.aliases ?? [])].map(norm).filter((h) => h.length >= 3));
+}
+
+function accountOf(url: string): { host: string; handle: string } | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  const host = u.hostname.toLowerCase().replace(/^www\./, "");
+  const sub = PROFILE_SUBDOMAINS.find((d) => host.endsWith(`.${d}`));
+  if (sub) return { host: sub, handle: host.slice(0, -sub.length - 1).split(".").at(-1) ?? "" };
+  const read = PROFILE_PATHS[host];
+  const handle = read?.(u.pathname.split("/").filter(Boolean).map((x) => decodeURIComponent(x)));
+  return handle ? { host, handle } : null;
+}
+
+/**
+ * The brand that owns a cited page: its own domain, or its account on another site (github.com/openlit,
+ * pypi.org/project/openlit, x.com/openlit, openlit.github.io). Returns the brand's domain, or null.
+ */
+export function ownerOf(url: string, host: string, brands: Brand[]): string | null {
+  const h = host.toLowerCase().replace(/^www\./, "");
+  for (const b of brands) if (b.domain && onDomain(h, b.domain.toLowerCase())) return b.domain;
+  const acct = accountOf(url);
+  if (!acct) return null;
+  const handle = norm(acct.handle);
+  for (const b of brands) {
+    const hs = handlesOf(b);
+    if (hs.has(handle) || hs.has(handle.replace(HANDLE_SUFFIX, ""))) return b.domain;
+  }
+  return null;
+}
+
+/** The profile a URL is on, for grouping: "github.com/openlit". */
+export function profileKey(url: string): string | null {
+  const a = accountOf(url);
+  return a ? `${a.host}/${a.handle.toLowerCase()}` : null;
+}
+
+/** Does any source belong to the brand (its site or one of its accounts)? */
+export function citesBrand(sources: { domain: string; url?: string }[], brand: Brand, brands: Brand[] = [brand]): boolean {
+  return sources.some((s) => ownerOf(s.url ?? "", s.domain, brands) === brand.domain);
+}
+
+export function classifySource(host: string, you: string, competitors: string[], owner: string | null = null): SourceType {
+  if (owner && owner === you) return "you";
+  if (owner && competitors.includes(owner)) return "competitor";
   const h = host.toLowerCase().replace(/^www\./, "");
   if (you && onDomain(h, you)) return "you";
   if (competitors.some((c) => onDomain(h, c))) return "competitor";
@@ -293,27 +370,32 @@ export interface SourceRow {
   urls: { url: string; title: string; count: number }[];
 }
 
-export function citationTable(answers: Answer[], you: string, competitors: string[]): SourceRow[] {
+/** Cited domains, busiest first. With `brands`, a brand's own accounts get their own row ("github.com/openlit") typed as theirs. */
+export function citationTable(answers: Answer[], you: string, competitors: string[], brands: Brand[] = []): SourceRow[] {
   type Acc = { answers: Set<string>; prompts: Set<string>; withBrands: Record<string, number>; urls: Map<string, { title: string; count: number }> };
   const by = new Map<string, Acc>();
+  const owners = new Map<string, string>();
   for (const a of answers.filter(ok)) {
     const key = `${a.engine}|${a.prompt}`;
     const named = (a.brands ?? []).filter((b) => b.mentioned && !b.subject).map((b) => b.domain);
     for (const s of a.sources) {
-      const e: Acc = by.get(s.domain) ?? { answers: new Set<string>(), prompts: new Set<string>(), withBrands: {}, urls: new Map() };
+      const owner = brands.length ? ownerOf(s.url, s.domain, brands) : null;
+      const row = owner && !onDomain(s.domain.toLowerCase().replace(/^www\./, ""), owner) ? (profileKey(s.url) ?? s.domain) : s.domain;
+      if (owner) owners.set(row, owner);
+      const e: Acc = by.get(row) ?? { answers: new Set<string>(), prompts: new Set<string>(), withBrands: {}, urls: new Map() };
       if (!e.answers.has(key)) for (const d of named) e.withBrands[d] = (e.withBrands[d] ?? 0) + 1;
       e.answers.add(key);
       e.prompts.add(a.prompt);
       const u = e.urls.get(s.url) ?? { title: s.title, count: 0 };
       u.count++;
       e.urls.set(s.url, u);
-      by.set(s.domain, e);
+      by.set(row, e);
     }
   }
   return [...by]
     .map(([domain, e]) => ({
       domain,
-      type: classifySource(domain, you, competitors),
+      type: classifySource(domain.split("/")[0], you, competitors, owners.get(domain) ?? null),
       answers: e.answers.size,
       prompts: e.prompts.size,
       withBrands: e.withBrands,
@@ -347,7 +429,7 @@ export const OPPORTUNITY_KINDS: Record<OpportunityKind, string> = {
   reputation: "Fix perception",
 };
 
-const PAGE_FOR: Partial<Record<PromptType, (p: string, comp: string[]) => { title: string; steps: string[] }>> = {
+export const PAGE_FOR: Partial<Record<PromptType, (p: string, comp: string[]) => { title: string; steps: string[] }>> = {
   comparison: (_p, comp) => ({
     title: `Publish a comparison page${comp[0] ? ` against ${nameOf(comp[0])}` : ""}`,
     steps: ["Lead with a one-paragraph verdict: who should pick which.", "Add a feature and pricing table with current numbers.", "Be fair: say where the other product is stronger. Engines quote balanced pages."],
@@ -430,7 +512,7 @@ export function opportunities(answers: Answer[], brands: Brand[], brand: string)
   }
 
   // 3. Third-party domains cited where competitors appear but you don't.
-  const table = citationTable(done, you, competitors);
+  const table = citationTable(done, you, competitors, brands);
   const thirdParty = table.filter((s) => !["you", "competitor", "other"].includes(s.type) || (s.type === "other" && s.answers >= 2));
   for (const s of thirdParty.slice(0, 12)) {
     const compHits = competitors.reduce((n, c) => n + (s.withBrands[c] ?? 0), 0);
@@ -520,7 +602,7 @@ export const ENGINE_NOTES: Record<AiEngine, string> = {
   claude: "Claude's web search fetches pages with Claude-SearchBot and Claude-User from a third-party search index.",
 };
 
-const ENGINE_STEPS: Record<AiEngine, string[]> = {
+export const ENGINE_STEPS: Record<AiEngine, string[]> = {
   google: ["Improve the Google ranking of the pages for these prompts (Rankings, Keywords).", "Add FAQ and HowTo sections that answer the question directly."],
   gemini: ["Improve the Google ranking of the pages for these prompts.", "Keep Organization and Product schema accurate."],
   chatgpt: ["Allow OAI-SearchBot and ChatGPT-User in robots.txt and your firewall.", "Submit your sitemap to Bing Webmaster Tools and enable IndexNow."],
