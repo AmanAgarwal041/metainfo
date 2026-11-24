@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { nameOf, PROMPT_TYPES, STAGES, type Brand, type BrandResult, type PromptType, type Sentiment } from "@/lib/aeo";
+import { citesBrand, nameOf, PROMPT_TYPES, STAGES, type Brand, type BrandResult, type PromptType, type Sentiment } from "@/lib/aeo";
 import type { Observation } from "@/lib/ai-visibility";
 import type { Project } from "@/lib/project";
 
@@ -13,12 +13,19 @@ export function brandsOf(project: Project, brand: string): Brand[] {
   ];
 }
 
-/** Older runs only stored mentioned/cited: fill in the rest as unknown. */
+/**
+ * Older runs only stored mentioned/cited: fill in the rest as unknown. "Cited" is re-checked against the sources,
+ * so a brand's own accounts (github.com/openlit) count in runs saved before they did.
+ */
 export function brandResults(o: Observation, brands: Brand[]): BrandResult[] {
-  if (o.brands?.length) return o.brands;
+  const owned = (b: Brand) => citesBrand(o.sources, b, brands);
+  if (o.brands?.length) return o.brands.map((r) => {
+    const b = brands.find((x) => x.domain === r.domain);
+    return !r.cited && b && owned(b) ? { ...r, cited: true, mentioned: r.mentioned || !o.excerpt } : r;
+  });
   return brands.map((b, i) => {
     const m = i === 0 ? o.you : o.competitors[b.domain];
-    return { domain: b.domain, mentioned: !!m?.mentioned, cited: !!m?.cited, position: null, sentiment: null, quote: "", judgedBy: "code" };
+    return { domain: b.domain, mentioned: !!m?.mentioned || (owned(b) && !o.excerpt), cited: !!m?.cited || owned(b), position: null, sentiment: null, quote: "", judgedBy: "code" };
   });
 }
 
