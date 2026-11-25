@@ -1,8 +1,15 @@
 import type { Metadata } from "next";
+import { toolMeta } from "@/lib/site";
+import ToolSchema from "@/components/ToolSchema";
 import KeywordGap from "@/components/research/KeywordGap";
 
-export const metadata: Metadata = { title: "Keyword gap" };
+export const metadata: Metadata = toolMeta("/keyword-gap");
 
 export default function Page() {
-  return <KeywordGap />;
+  return (
+    <>
+      <ToolSchema path="/keyword-gap" />
+      <KeywordGap />
+    </>
+  );
 }

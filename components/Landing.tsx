@@ -21,8 +21,7 @@ import {
   IconUsers,
 } from "./icons";
 import { Logo } from "./Logo";
-
-const REPO = "https://github.com/AmanAgarwal041/metainfo";
+import { DESCRIPTION, LAST_UPDATED, REPO, SITE_NAME, SITE_URL } from "@/lib/site";
 
 /** Screenshots in public/landing are 1600×1111 JPEGs of the live app (dark theme). */
 function Shot({ src, alt, eager = false }: { src: string; alt: string; eager?: boolean }) {
@@ -54,7 +53,7 @@ const GROUPS: { label: string; blurb: string; items: Feature[] }[] = [
       { icon: IconBolt, title: "Fix plan", href: "/audit", body: "Failing checks grouped into blockers, quick wins, foundations and polish, ranked by score gain per unit of effort." },
       { icon: IconRobot, title: "AI & crawler access", href: "/audit", body: "robots.txt verdicts and live HTTP probes for 14 search, AI-search and training crawlers, so CDN blocks show up." },
       { icon: IconSpark, title: "AI citation readiness", href: "/audit", body: "GEO score, passage citability, answer-first structure, sourced claims and freshness, all deterministic." },
-      { icon: IconSitemap, title: "JS rendering & site crawl", href: "/site-audit", body: "Flag content that only appears after JavaScript runs (measured with the optional rendering service), and crawl a whole site for broken links, duplicates and template-wide issues." },
+      { icon: IconSitemap, title: "JS rendering & site crawl", href: "/site-audit", body: "The site crawl finds broken links, duplicate titles and template-wide issues across a whole site, and flags content that only appears after JavaScript runs, which most AI crawlers never see." },
       { icon: IconSchema, title: "Schema validator", href: "/schema", body: "JSON-LD, Microdata and RDFa against the full schema.org vocabulary, plus Google rich-result requirements." },
     ],
   },
@@ -75,14 +74,14 @@ const GROUPS: { label: string; blurb: string; items: Feature[] }[] = [
     items: [
       { icon: IconDashboard, title: "Dashboard", href: "/dashboard", body: "Scores per platform over time, AI readiness, next fixes and a setup checklist for each project." },
       { icon: IconTrend, title: "Rank tracking", href: "/rankings", body: "Desktop or mobile positions for your keywords and competitors, with a cost estimate before each run.", paid: true },
-      { icon: IconRobot, title: "AI visibility", href: "/ai-visibility", body: "Ask ChatGPT, Claude, Gemini and Perplexity your prompts and see whether they mention or cite you.", paid: true },
+      { icon: IconRobot, title: "AI visibility", href: "/ai-visibility", body: "Ask ChatGPT, Claude, Gemini, Perplexity and AI Overviews your buyers' prompts, see who they name and cite, then track the fixes and measure their impact.", paid: true },
     ],
   },
   {
     label: "Integrate",
     blurb: "Use it from your pipeline or your agent.",
     items: [
-      { icon: IconPlug, title: "MCP server", body: "Streamable HTTP at /api/mcp: audit_page, validate_schema and keyword_ideas for any MCP client." },
+      { icon: IconPlug, title: "MCP server", body: "Streamable HTTP at /api/mcp: page audits, schema validation, AI citation checks and ready-made workflows for Claude, Cursor or your own agent." },
       { icon: IconCheck, title: "CI-friendly report API", body: "GET /api/report runs the same engine server-side and answers 422 when the score is below your bar." },
       { icon: IconUsers, title: "Optional team workspaces", body: "Sign in to sync projects and history across devices and share them with your team." },
     ],
@@ -102,14 +101,14 @@ const SHOWCASE = [
     alt: "The fix plan: tasks grouped into blockers and quick wins, with projected score gains per platform",
     kicker: "Fix plan",
     title: "A ranked to-do list, not a wall of warnings",
-    body: "Failing checks become tasks with an effort level, the platforms they affect and the points they're worth. Projected scores show where you'll land, and the plan exports to Markdown for your tracker.",
+    body: "MetaInfo turns every failing check into a task with an effort level, the platforms it affects and the points it's worth, ranked by gain per unit of effort. Projected scores show where you'll land, and the plan exports to Markdown or a prompt for your coding agent.",
   },
   {
     src: "ai-citations.jpg",
     alt: "The AI citations tab: GEO score, passage citability grade and the sections an answer engine is most likely to quote",
     kicker: "AI citation readiness",
     title: "Write passages answer engines want to quote",
-    body: "Every section is scored for answer quality, self-containment, readability, sources and originality. You see the most quotable passages, the weakest ones and exactly why they're weak.",
+    body: "Answer engines quote short, self-contained passages that answer a question in the first sentence. MetaInfo scores every section of your page for answer quality, self-containment, readability, sources and originality, and shows the weakest ones with the reason.",
   },
 ];
 
@@ -125,6 +124,57 @@ const FAMILY = [
   { name: "SocialBrewery", href: "https://socialbrewery.agarwal-aman041.workers.dev", body: "An AI posting studio for YouTube Shorts, LinkedIn, Instagram, X, Hashnode, Slack and Reddit." },
 ];
 
+const FAQ = [
+  {
+    q: "What is MetaInfo?",
+    a: "MetaInfo is a free, open-source SEO and AI visibility toolkit. It audits any page with 55+ checks scored separately for Google, Bing, ChatGPT, Perplexity, Claude, Gemini and social sharing, and turns failures into a ranked fix plan.",
+  },
+  {
+    q: "How do I check if ChatGPT or Perplexity cites my website?",
+    a: "Add the questions your buyers ask on the AI visibility page and run a check: MetaInfo asks ChatGPT, Claude, Gemini, Perplexity and Google AI Overviews each prompt and reports whether they name you, link to you, in what position and tone, and who they recommend instead.",
+  },
+  {
+    q: "How do I get cited by AI answer engines?",
+    a: "Get onto the pages engines already cite for your prompts, publish a page that answers the prompt in its first 40 to 80 words, and make sure AI crawlers can fetch it. MetaInfo lists these actions per prompt, tracks them, and measures visibility after each run.",
+  },
+  {
+    q: "Is MetaInfo free?",
+    a: "Yes, MetaInfo costs $0. The page audit, schema validator, site crawl and AI citation simulator are free and need no account. Search volumes, rankings and live AI answers use your own DataForSEO keys, paid per request.",
+  },
+  {
+    q: "Which AI crawlers does the audit test?",
+    a: "The audit checks 14 search, AI-search and training crawlers, including Googlebot, Bingbot, OAI-SearchBot, GPTBot, ChatGPT-User, ClaudeBot, PerplexityBot and Google-Extended, against robots.txt and with a live HTTP request, so CDN and firewall blocks show up.",
+  },
+];
+
+const JSON_LD = {
+  "@context": "https://schema.org",
+  "@graph": [
+    { "@type": "Organization", "@id": `${SITE_URL}/#org`, name: SITE_NAME, url: `${SITE_URL}/`, logo: `${SITE_URL}/icon.svg`, sameAs: [REPO] },
+    { "@type": "WebSite", "@id": `${SITE_URL}/#website`, name: SITE_NAME, url: `${SITE_URL}/`, publisher: { "@id": `${SITE_URL}/#org` } },
+    {
+      "@type": "SoftwareApplication",
+      name: SITE_NAME,
+      url: `${SITE_URL}/`,
+      description: DESCRIPTION,
+      applicationCategory: "BusinessApplication",
+      applicationSubCategory: "SEO software",
+      operatingSystem: "Web",
+      isAccessibleForFree: true,
+      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+      image: `${SITE_URL}/og.png`,
+      dateModified: LAST_UPDATED,
+      publisher: { "@id": `${SITE_URL}/#org` },
+      sameAs: [REPO],
+    },
+    {
+      "@type": "FAQPage",
+      dateModified: LAST_UPDATED,
+      mainEntity: FAQ.map((f) => ({ "@type": "Question", name: f.q, acceptedAnswer: { "@type": "Answer", text: f.a } })),
+    },
+  ],
+};
+
 const CURL = `# Fail the build when the page scores below 80
 curl -f "https://metainfo.agarwal-aman041.workers.dev/api/report\\
 ?url=example.com/pricing&format=summary&min=80"`;
@@ -135,6 +185,7 @@ const MCP = `claude mcp add --transport http metainfo \\
 export default function Landing() {
   return (
     <div className="lp">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD).replace(/</g, "\\u003c") }} />
       <header className="lp-nav">
         <div className="lp-wrap lp-nav-in">
           <Link href="/" className="lp-brand" aria-label="MetaInfo home">
@@ -143,6 +194,7 @@ export default function Landing() {
           <nav className="lp-nav-links" aria-label="Landing">
             <a href="#features">Features</a>
             <a href="#developers">Developers</a>
+            <a href="#faq">FAQ</a>
             <a href={REPO} target="_blank" rel="noreferrer">GitHub</a>
           </nav>
           <Link className="btn btn-sm" href="/dashboard">
@@ -273,8 +325,8 @@ export default function Landing() {
               <code>min</code> the response is HTTP 422 when the score falls below your threshold, so <code>curl -f</code> fails the pipeline.
             </p>
             <p>
-              The MCP server at <code>/api/mcp</code> gives Claude and other MCP clients <code>audit_page</code>, <code>validate_schema</code> and{" "}
-              <code>keyword_ideas</code>, plus the research tools when DataForSEO is configured.
+              The MCP server at <code>/api/mcp</code> gives Claude and other MCP clients <code>audit_page</code>, <code>validate_schema</code>,{" "}
+              <code>simulate_ai_citation</code> and <code>ai_visibility_check</code>, plus workflows such as <code>improve_ai_citations</code> that chain them.
             </p>
             <p>
               <a href={REPO} target="_blank" rel="noreferrer">
@@ -292,6 +344,20 @@ export default function Landing() {
           </div>
         </section>
 
+        <section id="faq" className="lp-section lp-wrap">
+          <div className="lp-head">
+            <h2>Questions people ask about SEO and AI visibility</h2>
+          </div>
+          <div className="lp-faq">
+            {FAQ.map((f) => (
+              <div key={f.q} className="lp-faq-item">
+                <h3>{f.q}</h3>
+                <p>{f.a}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <section className="lp-section lp-wrap">
           <div className="lp-head">
             <h2>Part of a product family</h2>
@@ -300,7 +366,7 @@ export default function Landing() {
           <div className="lp-family">
             {FAMILY.map((f) => (
               <a key={f.name} className="lp-card lp-family-card" href={f.href} target="_blank" rel="noreferrer">
-                <h4>{f.name} ↗</h4>
+                <h3>{f.name} ↗</h3>
                 <p>{f.body}</p>
               </a>
             ))}
@@ -333,7 +399,9 @@ export default function Landing() {
               GitHub
             </a>
           </nav>
-          <p className="muted small">Open source. Built with Next.js, Rust/WebAssembly and Cloudflare Workers.</p>
+          <p className="muted small">
+            Open source. Built with Next.js, Rust/WebAssembly and Cloudflare Workers. Updated <time dateTime={LAST_UPDATED}>{new Date(`${LAST_UPDATED}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" })}</time>.
+          </p>
         </div>
       </footer>
     </div>

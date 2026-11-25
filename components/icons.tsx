@@ -37,4 +37,5 @@ export const IconCheck = make(<path d="m5 12 5 5 9-10" />);
 export const IconRobot = make(<><rect x="5" y="8" width="14" height="11" rx="3" /><path d="M12 4v4M9 13h.01M15 13h.01M9.5 16.5h5" /></>);
 export const IconSchema = make(<><path d="M8 4H7a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1M16 4h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-1" /><path d="m9.5 12 1.75 1.75L14.5 10.5" /></>);
 export const IconPulse = make(<path d="M3 12h4l2.5-6 4 12 2.5-6h5" />);
+export const IconConsole = make(<><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 16v-3M11 16V9M15 16v-5" /><path d="M3 8h18" /></>);
 export const IconSitemap = make(<><rect x="9" y="3" width="6" height="5" rx="1" /><rect x="3" y="16" width="6" height="5" rx="1" /><rect x="15" y="16" width="6" height="5" rx="1" /><path d="M12 8v4M6 16v-2h12v2" /></>);

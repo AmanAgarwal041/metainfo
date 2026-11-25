@@ -244,3 +244,186 @@ export function Distribution({ parts, ariaLabel }: { parts: { label: string; val
     </div>
   );
 }
+
+/**
+ * Half-circle gauge for a 0-100 share (visibility, sentiment). The arc is split into tone bands so the reading has a
+ * frame of reference; the value is the large number, not the needle, so it's readable without color.
+ */
+export function Gauge({
+  value,
+  label,
+  sub,
+  bands = [
+    { to: 25, color: "var(--fail)" },
+    { to: 60, color: "var(--warn)" },
+    { to: 100, color: "var(--pass)" },
+  ],
+  format = (n) => `${n}%`,
+}: {
+  value: number | null;
+  label: string;
+  sub?: string;
+  bands?: { to: number; color: string }[];
+  format?: (n: number) => string;
+}) {
+  const W = 240;
+  const R = 92;
+  const cx = W / 2;
+  const cy = 112;
+  const v = value == null ? null : Math.max(0, Math.min(100, value));
+  const pt = (pct: number, r = R) => {
+    const a = Math.PI * (1 - pct / 100);
+    return [cx + r * Math.cos(a), cy - r * Math.sin(a)] as const;
+  };
+  const arc = (from: number, to: number) => {
+    const [x1, y1] = pt(from);
+    const [x2, y2] = pt(to);
+    return `M${x1.toFixed(1)},${y1.toFixed(1)} A${R},${R} 0 0 1 ${x2.toFixed(1)},${y2.toFixed(1)}`;
+  };
+  const tone = v == null ? "var(--text-3)" : (bands.find((b) => v <= b.to) ?? bands.at(-1)!).color;
+  return (
+    <figure className="gauge" aria-label={`${label}: ${v == null ? "no data" : format(v)}`} role="img">
+      <svg viewBox={`0 0 ${W} 128`} aria-hidden="true">
+        <path d={arc(0, 100)} className="gauge-track" />
+        {v != null && v > 0 && <path d={arc(0, v)} stroke={tone} className="gauge-fill" />}
+        {bands.slice(0, -1).map((b) => {
+          const [x, y] = pt(b.to, R + 13);
+          return <circle key={b.to} cx={x} cy={y} r={2} fill="var(--line-strong)" />;
+        })}
+        {v != null && (() => {
+          const [x, y] = pt(v, R - 22);
+          return <line x1={cx} y1={cy} x2={x} y2={y} className="gauge-needle" />;
+        })()}
+        <circle cx={cx} cy={cy} r={4} fill="var(--text)" />
+        <text x={cx - R} y={cy + 14} textAnchor="middle">0</text>
+        <text x={cx + R} y={cy + 14} textAnchor="middle">100</text>
+      </svg>
+      <figcaption>
+        <b style={{ color: tone }}>{v == null ? "–" : format(v)}</b>
+        <span>{sub ?? label}</span>
+      </figcaption>
+    </figure>
+  );
+}
+
+/** Stacked columns over time (one column per run), as shares of each column's total, with a table view. */
+export function StackedBars({
+  x,
+  series,
+  ariaLabel,
+  height = 220,
+}: {
+  x: string[];
+  series: Series[];
+  ariaLabel: string;
+  height?: number;
+}) {
+  const [table, setTable] = useState(false);
+  const [hover, setHover] = useState<number | null>(null);
+  const W = 760;
+  const H = height;
+  const pad = { l: 36, r: 12, t: 10, b: 26 };
+  const iw = W - pad.l - pad.r;
+  const ih = H - pad.t - pad.b;
+  const totals = x.map((_, i) => series.reduce((s, se) => s + (se.values[i] ?? 0), 0));
+  const slot = iw / Math.max(1, x.length);
+  const bw = Math.min(64, slot * 0.6);
+  const share = (v: number, i: number) => (totals[i] ? (v / totals[i]) * 100 : 0);
+  const shown = series.filter((s) => s.values.some((v) => v));
+  return (
+    <div>
+      <div className="row" style={{ marginBottom: 8, flexWrap: "nowrap", alignItems: "flex-start" }}>
+        <div className="legend" style={{ flex: 1 }}>
+          {shown.map((s) => (
+            <span key={s.id} className="row" style={{ gap: 6 }}>
+              <span className="dot" style={{ background: s.color, borderRadius: 2 }} />
+              {s.label}
+            </span>
+          ))}
+        </div>
+        <button className="btn btn-sm btn-ghost" style={{ flex: "none" }} onClick={() => setTable(!table)} aria-pressed={table}>
+          {table ? "Chart" : "Table"}
+        </button>
+      </div>
+      {table ? (
+        <div className="table-wrap">
+          <table className="t">
+            <thead>
+              <tr>
+                <th>Run</th>
+                {shown.map((s) => <th key={s.id} style={{ textAlign: "right" }}>{s.label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {x.map((l, i) => (
+                <tr key={i}>
+                  <td>{l}</td>
+                  {shown.map((s) => <td key={s.id} style={{ textAlign: "right" }}>{s.values[i] ? `${s.values[i]} (${Math.round(share(s.values[i]!, i))}%)` : ""}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="chart-wrap">
+          <svg viewBox={`0 0 ${W} ${H}`} className="chart" role="img" aria-label={ariaLabel} onPointerLeave={() => setHover(null)}>
+            {[0, 25, 50, 75, 100].map((t) => {
+              const y = pad.t + ih - (t / 100) * ih;
+              return (
+                <g key={t}>
+                  <line className={t === 0 ? "baseline" : "gridline"} x1={pad.l} x2={W - pad.r} y1={y} y2={y} />
+                  <text x={pad.l - 8} y={y + 4} textAnchor="end">{t}%</text>
+                </g>
+              );
+            })}
+            {x.map((l, i) => {
+              const cx = pad.l + slot * i + slot / 2;
+              let acc = 0;
+              return (
+                <g key={i} onPointerEnter={() => setHover(i)}>
+                  <rect x={cx - slot / 2} y={pad.t} width={slot} height={ih} fill="transparent" />
+                  {shown.map((s) => {
+                    const v = share(s.values[i] ?? 0, i);
+                    if (!v) return null;
+                    const y = pad.t + ih - ((acc + v) / 100) * ih;
+                    acc += v;
+                    return <rect key={s.id} x={cx - bw / 2} y={y} width={bw} height={Math.max(0, (v / 100) * ih - 1)} fill={s.color} rx={1.5} />;
+                  })}
+                  <text x={cx} y={H - 6} textAnchor="middle">{l}</text>
+                </g>
+              );
+            })}
+          </svg>
+          {hover != null && totals[hover] > 0 && (
+            <div className="chart-tip" style={{ left: `${((pad.l + slot * hover + slot / 2) / W) * 100}%`, top: 0, transform: `translate(${hover > x.length / 2 ? "calc(-100% - 12px)" : "12px"}, 0)` }}>
+              <div className="tip-date">{x[hover]} · {totals[hover]} citations</div>
+              {shown.filter((s) => s.values[hover]).sort((a, b) => (b.values[hover] ?? 0) - (a.values[hover] ?? 0)).map((s) => (
+                <div className="tip-row" key={s.id}>
+                  <span className="line-key" style={{ background: s.color }} />
+                  <b>{Math.round(share(s.values[hover]!, hover))}%</b>
+                  {s.label}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Ranked horizontal bars with the value at the end: for "top N" lists where the label matters more than the axis. */
+export function HBars({ items, format = (n) => String(n), color = "var(--accent)" }: { items: { label: string; value: number; href?: string; title?: string }[]; format?: (n: number) => string; color?: string }) {
+  const max = Math.max(1, ...items.map((i) => i.value));
+  return (
+    <div className="hbars">
+      {items.map((i) => (
+        <div className="hbar" key={i.label} title={i.title ?? i.label}>
+          <span className="hbar-label">{i.href ? <a href={i.href} target="_blank" rel="noreferrer">{i.label}</a> : i.label}</span>
+          <span className="hbar-track"><span style={{ width: `${(i.value / max) * 100}%`, background: color }} /></span>
+          <b className="mono small">{format(i.value)}</b>
+        </div>
+      ))}
+    </div>
+  );
+}

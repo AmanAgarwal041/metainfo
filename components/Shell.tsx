@@ -9,6 +9,7 @@ import { setTheme, useTheme, type ThemePref } from "@/lib/theme";
 import {
   IconArrow,
   IconAudit,
+  IconConsole,
   IconDashboard,
   IconGap,
   IconKey,
@@ -57,6 +58,7 @@ const NAV: { label?: string; items: Item[] }[] = [
   {
     label: "Track",
     items: [
+      { href: "/search-console", label: "Search Console", icon: IconConsole },
       { href: "/rankings", label: "Rank tracking", icon: IconTrend },
       { href: "/traffic", label: "Traffic", icon: IconPulse },
     ],

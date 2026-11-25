@@ -4,128 +4,24 @@ import { Fragment, useMemo, useState } from "react";
 import {
   citationTable,
   classifyPrompt,
-  metricsFor,
   nameOf,
-  OPPORTUNITY_KINDS,
-  opportunities,
   PROMPT_TYPES,
   SOURCE_TYPES,
   STAGES,
   type Answer,
   type Brand,
-  type PromptType,
   type SourceType,
   type Stage,
 } from "@/lib/aeo";
 import type { Observation } from "@/lib/ai-visibility";
-import { fromOpportunity, type PromptContext } from "@/lib/fix-prompts";
-import { CollatedPrompt, FixPromptButton, PickBox, useFixPicker } from "../FixPrompt";
 import { AI_ENGINES, type AiEngine } from "@/lib/research-types";
-import { Kpi } from "../kit";
+import { Delta } from "../kit";
+import { promptRows, visTone } from "@/lib/aeo-insights";
 import { Meter, Section, SentimentBadge, TypeBadge } from "./shared";
 
 const engineLabel = (e: AiEngine) => AI_ENGINES.find((x) => x.id === e)?.label ?? e;
+const NONE: Answer[] = [];
 const fmtPos = (p: number | null) => (p == null ? "–" : `#${p}`);
-
-// ------------------------------------------------------------- overview
-
-export function Overview({ answers, brands, brand }: { answers: Answer[]; brands: Brand[]; brand: string }) {
-  const you = brands[0].domain;
-  const m = metricsFor(answers, you);
-  const engines = AI_ENGINES.filter((e) => answers.some((a) => a.engine === e.id));
-  const types = useMemo(() => {
-    const by = new Map<PromptType, Answer[]>();
-    for (const a of answers) {
-      const t = classifyPrompt(a.prompt, brand);
-      by.set(t, [...(by.get(t) ?? []), a]);
-    }
-    return [...by].map(([t, xs]) => ({ t, m: metricsFor(xs, you) })).sort((a, b) => Object.keys(PROMPT_TYPES).indexOf(a.t) - Object.keys(PROMPT_TYPES).indexOf(b.t));
-  }, [answers, brand, you]);
-  const landscape = brands.map((b) => ({ b, m: metricsFor(answers, b.domain) })).sort((a, b) => b.m.shareOfVoice - a.m.shareOfVoice);
-
-  return (
-    <>
-      <div className="kpi-row">
-        <Kpi label="Visibility" value={`${m.visibility}%`} foot={`of ${m.answered} answers mention you`} />
-        <Kpi label="Share of voice" value={`${m.shareOfVoice}%`} foot="of all brand mentions" />
-        <Kpi label="Average position" value={m.avgPosition == null ? "–" : `#${m.avgPosition}`} foot="among brands named, when you're named" />
-        <Kpi label="Sentiment" value={m.sentiment == null ? "–" : m.sentiment} foot={`${m.sentiments.positive} positive · ${m.sentiments.mixed} mixed · ${m.sentiments.negative} negative`} tone={m.sentiment != null && m.sentiment < 50 ? "var(--warn)" : undefined} />
-      </div>
-
-      <div className="bento">
-        <section className="card card-pad b-7">
-          <h2 className="section-title">Competitive landscape</h2>
-          <p className="section-sub">Share of voice: each brand&apos;s share of all brand mentions across the answers.</p>
-          <div className="table-wrap">
-            <table className="t">
-              <thead>
-                <tr>
-                  <th>Brand</th>
-                  <th style={{ width: "34%" }}>Share of voice</th>
-                  <th style={{ textAlign: "right" }}>Visibility</th>
-                  <th style={{ textAlign: "right" }}>Cited</th>
-                  <th style={{ textAlign: "right" }}>Position</th>
-                  <th style={{ textAlign: "right" }}>Sentiment</th>
-                </tr>
-              </thead>
-              <tbody>
-                {landscape.map(({ b, m: x }) => (
-                  <tr key={b.domain}>
-                    <td>
-                      <b>{b.name}</b> {b.domain === you && <span className="badge accent">you</span>}
-                      <div className="muted small">{b.domain}</div>
-                    </td>
-                    <td style={{ verticalAlign: "middle" }}>
-                      <div className="row" style={{ gap: 8 }}>
-                        <Meter value={x.shareOfVoice} color={b.domain === you ? "var(--accent)" : "var(--text-3)"} />
-                        <span className="small mono">{x.shareOfVoice}%</span>
-                      </div>
-                    </td>
-                    <td style={{ textAlign: "right" }}>{x.visibility}%</td>
-                    <td style={{ textAlign: "right" }}>{x.citationRate}%</td>
-                    <td style={{ textAlign: "right" }}>{x.avgPosition == null ? "–" : `#${x.avgPosition}`}</td>
-                    <td style={{ textAlign: "right" }}>{x.sentiment ?? "–"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {brands.length === 1 && <p className="muted small">Add competitors to the project to compare.</p>}
-        </section>
-
-        <section className="card card-pad b-5">
-          <h2 className="section-title">By engine</h2>
-          <div className="list-rows">
-            {engines.map((e) => {
-              const x = metricsFor(answers.filter((a) => a.engine === e.id), you);
-              return (
-                <div className="list-row" key={e.id}>
-                  <span className="row" style={{ gap: 6, width: 150 }}><span className="dot" style={{ background: e.color }} />{e.label}</span>
-                  <Meter value={x.visibility} color={e.color} />
-                  <span className="mono small" style={{ width: 40, textAlign: "right" }}>{x.visibility}%</span>
-                  <span className="muted small" style={{ width: 40, textAlign: "right" }}>{x.avgPosition == null ? "" : `#${x.avgPosition}`}</span>
-                </div>
-              );
-            })}
-          </div>
-          <h2 className="section-title" style={{ marginTop: 18 }}>By prompt type</h2>
-          <div className="list-rows">
-            {types.map(({ t, m: x }) => (
-              <div className="list-row" key={t}>
-                <span style={{ width: 150 }}>
-                  {PROMPT_TYPES[t].label} <span className="muted small">{STAGES[PROMPT_TYPES[t].stage]}</span>
-                </span>
-                <Meter value={x.visibility} />
-                <span className="mono small" style={{ width: 40, textAlign: "right" }}>{x.visibility}%</span>
-                <span className="muted small" style={{ width: 40, textAlign: "right" }}>{x.answered}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-      </div>
-    </>
-  );
-}
 
 // -------------------------------------------------------------- prompts
 
@@ -135,33 +31,61 @@ export function PromptTable({
   brands,
   onOpen,
   onReport,
+  previous = NONE,
 }: {
   observations: Observation[];
   brand: string;
   brands: Brand[];
+  /** The previous run's answers, for the change column. */
+  previous?: Answer[];
   onOpen: (o: Observation) => void;
   /** Open the prompt's report: every engine side by side, and what to do. */
   onReport?: (prompt: string) => void;
 }) {
   const [stage, setStage] = useState<Stage | "all">("all");
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState<"order" | "low" | "high" | "change">("order");
   const engines = AI_ENGINES.filter((e) => observations.some((o) => o.engine === e.id));
-  const prompts = [...new Set(observations.map((o) => o.prompt))].filter((p) => stage === "all" || PROMPT_TYPES[classifyPrompt(p, brand)].stage === stage);
+  const stats = useMemo(() => new Map(promptRows(observations, previous, brands, brand).map((r) => [r.prompt, r])), [observations, previous, brands, brand]);
+  const needle = q.trim().toLowerCase();
+  const prompts = [...new Set(observations.map((o) => o.prompt))]
+    .filter((p) => stage === "all" || PROMPT_TYPES[classifyPrompt(p, brand)].stage === stage)
+    .filter((p) => !needle || p.toLowerCase().includes(needle))
+    .sort((a, b) => {
+      const x = stats.get(a)!;
+      const y = stats.get(b)!;
+      if (sort === "low") return x.visibility - y.visibility;
+      if (sort === "high") return y.visibility - x.visibility;
+      if (sort === "change") return (y.change ?? -999) - (x.change ?? -999);
+      return 0;
+    });
   const you = brands[0].domain;
 
   return (
     <>
-      <div className="segmented" role="group" aria-label="Stage" style={{ marginBottom: 12 }}>
-        {(["all", "awareness", "consideration", "decision"] as const).map((s) => (
-          <button key={s} aria-pressed={stage === s} onClick={() => setStage(s)}>
-            {s === "all" ? "All stages" : STAGES[s]}
-          </button>
-        ))}
+      <div className="row" style={{ marginBottom: 12, gap: 10 }}>
+        <input className="input search-input" type="search" style={{ flex: 1, minWidth: 200, margin: 0 }} placeholder="Search prompts" aria-label="Search prompts" value={q} onChange={(e) => setQ(e.currentTarget.value)} />
+        <div className="segmented" role="group" aria-label="Stage">
+          {(["all", "awareness", "consideration", "decision"] as const).map((s) => (
+            <button key={s} aria-pressed={stage === s} onClick={() => setStage(s)}>
+              {s === "all" ? "All stages" : STAGES[s]}
+            </button>
+          ))}
+        </div>
+        <select className="select" aria-label="Sort prompts" value={sort} onChange={(e) => setSort(e.currentTarget.value as typeof sort)}>
+          <option value="order">Your order</option>
+          <option value="low">Lowest visibility first</option>
+          <option value="high">Highest visibility first</option>
+          <option value="change">Biggest gain first</option>
+        </select>
       </div>
       <div className="table-wrap">
         <table className="t">
           <thead>
             <tr>
               <th>Prompt</th>
+              <th style={{ textAlign: "right" }}>Visibility</th>
+              <th style={{ textAlign: "right" }} title="Points vs the previous run">Change</th>
               {engines.map((e) => (
                 <th key={e.id}>
                   <span className="row" style={{ gap: 6 }}><span className="dot" style={{ background: e.color }} />{e.label}</span>
@@ -183,6 +107,13 @@ export function PromptTable({
                     )}
                   </div>
                 </td>
+                <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                  <span className="row" style={{ gap: 6, justifyContent: "flex-end", flexWrap: "nowrap" }}>
+                    <span className="dot" style={{ background: visTone(stats.get(p)!.visibility) }} />
+                    <b className="mono small">{stats.get(p)!.visibility}%</b>
+                  </span>
+                </td>
+                <td style={{ textAlign: "right" }} className="small">{stats.get(p)!.change == null ? <span className="muted">new</span> : <Delta value={stats.get(p)!.change!} suffix=" pts" />}</td>
                 {engines.map((e) => {
                   const o = observations.find((x) => x.prompt === p && x.engine === e.id);
                   const me = o?.brands?.find((b) => b.domain === you);
@@ -293,71 +224,6 @@ export function Citations({ answers, brands }: { answers: Answer[]; brands: Bran
         </table>
       </div>
     </>
-  );
-}
-
-// -------------------------------------------------------- opportunities
-
-export function Opportunities({
-  answers,
-  brands,
-  brand,
-  domain,
-  onSimulate,
-}: {
-  answers: Answer[];
-  brands: Brand[];
-  brand: string;
-  domain: string;
-  onSimulate: (prompt: string) => void;
-}) {
-  const list = useMemo(() => opportunities(answers, brands, brand), [answers, brands, brand]);
-  const fixes = useMemo(() => list.map(fromOpportunity), [list]);
-  const ctx = useMemo<PromptContext>(() => ({ site: domain ? `https://${domain}` : brand, source: `AI visibility run (brand: ${brand})` }), [domain, brand]);
-  const picker = useFixPicker();
-  if (!list.length) return <p className="muted">No gaps found in this run: you&apos;re named wherever a competitor is. Add more prompts, especially best-of and alternatives prompts.</p>;
-  const cls = { high: "s-fail", medium: "s-warn", low: "s-info" };
-  return (
-    <div>
-      <CollatedPrompt fixes={fixes} ctx={ctx} picker={picker} />
-      {list.map((o, k) => (
-        <details className="insight" key={o.id} open={k === 0}>
-          <summary>
-            <div className="insight-head has-pick">
-              <PickBox id={o.id} title={o.title} picker={picker} />
-              <span className={`badge ${cls[o.priority]}`}>{OPPORTUNITY_KINDS[o.kind]}</span>
-              <div>
-                <div className="task-title">{o.title}</div>
-                <div className="task-rec">{o.why}</div>
-              </div>
-            </div>
-          </summary>
-          <div className="insight-body">
-            <ol className="insight-steps">
-              {o.steps.map((s) => <li key={s}>{s}</li>)}
-            </ol>
-            {o.prompts.length > 0 && (
-              <div className="list-rows" style={{ marginTop: 10 }}>
-                {o.prompts.map((p) => (
-                  <div className="list-row" key={p}>
-                    <span style={{ flex: 1 }}>{p}</span>
-                    <button className="btn btn-sm" onClick={() => onSimulate(p)}>Simulate agents</button>
-                  </div>
-                ))}
-              </div>
-            )}
-            {o.targets.length > 0 && (
-              <ul className="plain-list" style={{ marginTop: 10 }}>
-                {o.targets.map((t, i) => (
-                  <li key={`${i}:${t.url ?? t.label}`}>{t.url ? <a href={t.url} target="_blank" rel="noreferrer">{t.label}</a> : <span className="small">{t.label}</span>}</li>
-                ))}
-              </ul>
-            )}
-            <FixPromptButton fix={fixes[k]} ctx={ctx} />
-          </div>
-        </details>
-      ))}
-    </div>
   );
 }
 
