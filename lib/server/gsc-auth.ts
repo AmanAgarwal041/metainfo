@@ -3,12 +3,15 @@
 //  2. the server's service account (only for RESEARCH_TOKEN holders when that's set);
 //  3. on servers without accounts (no D1 or no Clerk) only: the browser's sealed cookie.
 // A signed-in request never uses the cookie.
+//
+// OAuth needs a Google OAuth client. On servers with accounts each workspace brings its own, saved by an admin in
+// Settings (gsc_oauth_clients); the environment's GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are never read there.
 
 import { getDb } from "./db";
 import { clerkEnabled } from "./auth/clerk";
 import { currentSession, type Signed } from "./auth/session";
 import { roleAtLeast } from "./auth/accounts";
-import { forgetConnection, GscError, isOwnerRequest, oauthAccessToken, oauthConfigured, openToken, serviceAccount, serviceAccountToken, SESSION_COOKIE, type GscAuth } from "./gsc";
+import { envClient, redirectUri, forgetConnection, GscError, isOwnerRequest, oauthAccessToken, openToken, revoke, sealToken, serviceAccount, serviceAccountToken, SESSION_COOKIE, type GscAuth, type OAuthClient } from "./gsc";
 
 export interface Connection {
   org_id: string;
@@ -66,6 +69,80 @@ export async function saveProperty(db: D1Database, orgId: string, projectId: str
     .run();
 }
 
+// ------------------------------------------------------------ workspace OAuth client
+
+interface ClientRow {
+  client_id: string;
+  client_secret: string;
+  updated_by: string | null;
+  updated_at: number;
+}
+
+/** What Settings shows about a workspace's client: never the secret. */
+export interface ClientInfo {
+  id: string;
+  updatedBy: string | null;
+  updatedAt: number;
+  /** The sealed secret can't be opened (the server's sealing key changed): an admin must enter it again. */
+  unreadable: boolean;
+}
+
+async function clientRow(db: D1Database, orgId: string): Promise<ClientRow | null> {
+  return db.prepare("SELECT client_id, client_secret, updated_by, updated_at FROM gsc_oauth_clients WHERE org_id = ?").bind(orgId).first<ClientRow>();
+}
+
+/** The workspace's own OAuth client, or null when none is saved (or its secret can't be opened). */
+export async function clientFor(db: D1Database, orgId: string): Promise<OAuthClient | null> {
+  const r = await clientRow(db, orgId);
+  if (!r) return null;
+  const secret = await openToken(r.client_secret);
+  return secret ? { id: r.client_id, secret } : null;
+}
+
+export async function clientInfo(db: D1Database, orgId: string): Promise<ClientInfo | null> {
+  const r = await clientRow(db, orgId);
+  return r ? { id: r.client_id, updatedBy: r.updated_by, updatedAt: r.updated_at, unreadable: (await openToken(r.client_secret)) === null } : null;
+}
+
+/**
+ * Save the workspace's client. An empty secret keeps the stored one (same client ID only). A different client ID
+ * ends the existing connection: Google ties refresh tokens to the client that issued them.
+ */
+export async function saveClient(db: D1Database, orgId: string, id: string, secret: string | null, userId: string): Promise<{ disconnected: boolean }> {
+  const old = await clientRow(db, orgId);
+  const sealed = secret ? await sealToken(secret) : old && old.client_id === id ? old.client_secret : null;
+  if (!sealed) throw new GscError("Enter the client secret.", 400, "bad-input");
+  const changed = Boolean(old && old.client_id !== id);
+  if (changed) await dropConnection(db, orgId);
+  await db
+    .prepare(
+      `INSERT INTO gsc_oauth_clients (org_id, client_id, client_secret, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (org_id) DO UPDATE SET client_id = excluded.client_id, client_secret = excluded.client_secret, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+    )
+    .bind(orgId, id, sealed, userId, Date.now())
+    .run();
+  // A new secret may fix a connection Google refused with the old one.
+  if (!changed && secret) await db.prepare("UPDATE gsc_connections SET last_error = NULL WHERE org_id = ?").bind(orgId).run();
+  return { disconnected: changed };
+}
+
+/** Remove the workspace's client and, since nothing can use it without one, its connection. */
+export async function deleteClient(db: D1Database, orgId: string): Promise<void> {
+  await dropConnection(db, orgId);
+  await db.prepare("DELETE FROM gsc_oauth_clients WHERE org_id = ?").bind(orgId).run();
+}
+
+async function dropConnection(db: D1Database, orgId: string) {
+  const { refresh, email } = await deleteConnection(db, orgId);
+  if (refresh && !(await emailInUse(db, email))) await revoke(refresh).catch(() => undefined);
+}
+
+/** The OAuth client for this request: the workspace's own with accounts, the environment's only without. */
+export async function oauthClient(ctx: GscContext): Promise<OAuthClient | null> {
+  if (!ctx.accounts) return envClient();
+  return ctx.session ? clientFor(ctx.session.db, ctx.session.orgId) : null;
+}
+
 export const validProjectId = (v: unknown): v is string => typeof v === "string" && /^[\w-]{1,64}$/.test(v);
 
 export interface GscContext {
@@ -91,14 +168,14 @@ const cookieOf = (req: Request) => {
 const HOUR = 3_600_000;
 
 /** An access token for an org connection; marks the row (and drops the cache) when Google refuses the grant. */
-async function orgToken(db: D1Database, c: Connection): Promise<string> {
+async function orgToken(db: D1Database, c: Connection, client: OAuthClient): Promise<string> {
   const refresh = await openToken(c.refresh_token);
   if (!refresh) {
     await db.prepare("UPDATE gsc_connections SET last_error = ? WHERE org_id = ?").bind("The stored connection can't be read (the server's secret changed). Reconnect.", c.org_id).run();
     throw new GscError("This workspace's Search Console connection needs to be reconnected by an admin.", 401, "reconnect");
   }
   try {
-    const token = await oauthAccessToken(refresh);
+    const token = await oauthAccessToken(refresh, client);
     const now = Date.now();
     if (!c.last_used_at || c.last_used_at < now - HOUR) await db.prepare("UPDATE gsc_connections SET last_used_at = ? WHERE org_id = ?").bind(now, c.org_id).run();
     return token;
@@ -113,37 +190,41 @@ async function orgToken(db: D1Database, c: Connection): Promise<string> {
 
 /** Resolve the request's Search Console access (see the order at the top). */
 export async function resolveAuth(req: Request, ctx?: GscContext): Promise<GscAuth & { orgId?: string; session?: Signed | null }> {
-  const { accounts, session } = ctx ?? (await gscContext(req));
+  const context = ctx ?? (await gscContext(req));
+  const { accounts, session } = context;
+  const client = await oauthClient(context);
   if (session) {
     const c = await connectionFor(session.db, session.orgId);
-    if (c && !c.last_error && oauthConfigured()) return { token: await orgToken(session.db, c), via: "org", email: c.email ?? undefined, orgId: session.orgId, session };
+    if (c && !c.last_error && client) return { token: await orgToken(session.db, c, client), via: "org", email: c.email ?? undefined, orgId: session.orgId, session };
     const sa = serviceAccount();
     if (sa && isOwnerRequest(req.headers)) return { token: await serviceAccountToken(sa), via: "service-account", email: sa.client_email, session };
     if (c?.last_error) throw new GscError("This workspace's Search Console connection stopped working. An admin needs to reconnect it.", 401, "reconnect");
     if (sa) throw new GscError("Search Console isn't connected for this workspace. An admin can connect it, or enter this server's access token to use its service account.", 401, "not-connected");
-    if (!oauthConfigured()) throw notConfigured();
+    if (!client) throw new GscError(roleAtLeast(session.role, "admin") ? "Add this workspace's Google OAuth client in Settings, then connect Search Console." : "Search Console isn't set up for this workspace yet. Ask an admin to add it in Settings.", 501, "not-configured");
     throw new GscError(roleAtLeast(session.role, "admin") ? "Connect Google Search Console for this workspace." : "Search Console isn't connected for this workspace yet. Ask an admin to connect it.", 401, "not-connected");
   }
   const sa = serviceAccount();
   if (sa && isOwnerRequest(req.headers)) return { token: await serviceAccountToken(sa), via: "service-account", email: sa.client_email };
-  if (!accounts && oauthConfigured()) {
+  if (!accounts && client) {
     const refresh = await openToken(cookieOf(req));
-    if (refresh) return { token: await oauthAccessToken(refresh), via: "browser" };
+    if (refresh) return { token: await oauthAccessToken(refresh, client), via: "browser" };
   }
-  if (accounts && oauthConfigured()) throw new GscError("Sign in to use your team's Search Console connection.", 401, "sign-in");
+  if (accounts) throw new GscError("Sign in to use your team's Search Console connection.", 401, "sign-in");
   if (sa) throw new GscError("This server's Search Console service account needs its access token (RESEARCH_TOKEN), or connect your own Google account.", 401, "token");
-  if (oauthConfigured()) throw new GscError("Connect Google Search Console to see your data.", 401, "not-connected");
-  throw notConfigured();
+  if (client) throw new GscError("Connect Google Search Console to see your data.", 401, "not-connected");
+  throw new GscError("Search Console isn't configured on this server. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (servers without accounts) or GSC_SERVICE_ACCOUNT_JSON.", 501, "not-configured");
 }
-
-const notConfigured = () =>
-  new GscError("Search Console isn't configured on this server. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (OAuth) or GSC_SERVICE_ACCOUNT_JSON.", 501, "not-configured");
 
 export interface GscStatus {
   mode: "org" | "service-account" | "browser" | "none";
   /** A connection is usable right now (mode isn't none and it hasn't failed). */
   connected: boolean;
+  /** An OAuth client is available: the workspace's own (with accounts) or the environment's (without). */
   oauthConfigured: boolean;
+  /** The workspace's saved client, for Settings (no secret). Null without accounts or when none is saved. */
+  client: ClientInfo | null;
+  /** The redirect URI to register on the OAuth client. */
+  redirectUri: string;
   /** The server keeps accounts; then connections belong to workspaces. */
   accounts: boolean;
   signedIn: boolean;
@@ -167,18 +248,23 @@ export interface GscStatus {
 
 /** What's configured and connected. Never calls Google. */
 export async function gscStatus(req: Request, projectId?: string | null): Promise<GscStatus> {
-  const { accounts, session } = await gscContext(req);
+  const ctx = await gscContext(req);
+  const { accounts, session } = ctx;
+  const client = await oauthClient(ctx);
+  const info = session ? await clientInfo(session.db, session.orgId) : null;
   const sa = serviceAccount();
   const owner = isOwnerRequest(req.headers);
   const saEmail = sa && owner ? sa.client_email : null;
   const conn = session ? await connectionFor(session.db, session.orgId) : null;
-  const orgOk = Boolean(conn && !conn.last_error && oauthConfigured());
-  const browserOk = !accounts && oauthConfigured() && (await openToken(cookieOf(req))) !== null;
+  const orgOk = Boolean(conn && !conn.last_error && client);
+  const browserOk = !accounts && Boolean(client) && (await openToken(cookieOf(req))) !== null;
   const mode: GscStatus["mode"] = orgOk ? "org" : saEmail ? "service-account" : browserOk ? "browser" : "none";
   return {
     mode,
     connected: mode !== "none",
-    oauthConfigured: oauthConfigured(),
+    oauthConfigured: Boolean(client),
+    client: info,
+    redirectUri: redirectUri(new URL(req.url).origin),
     accounts,
     signedIn: Boolean(session),
     role: session?.role ?? null,

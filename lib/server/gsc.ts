@@ -81,8 +81,12 @@ async function sha256Hex(s: string): Promise<string> {
 
 const keyCache = new Map<string, Promise<CryptoKey>>();
 
+/**
+ * The key that seals refresh tokens and workspace OAuth client secrets. Servers with accounts always have Clerk's
+ * secret; GSC_COOKIE_SECRET lets you rotate Clerk's without re-entering every workspace's Google client.
+ */
 function cookieSecret(): string | null {
-  return process.env.GSC_COOKIE_SECRET || process.env.GOOGLE_CLIENT_SECRET || null;
+  return process.env.GSC_COOKIE_SECRET || process.env.CLERK_SECRET_KEY || process.env.GOOGLE_CLIENT_SECRET || null;
 }
 
 function cookieKey(secret: string): Promise<CryptoKey> {
@@ -106,7 +110,7 @@ function cookieKey(secret: string): Promise<CryptoKey> {
 
 /** "v1.<iv>.<ciphertext>", base64url. */
 export async function sealToken(plain: string, secret = cookieSecret()): Promise<string> {
-  if (!secret) throw new GscError("Set GSC_COOKIE_SECRET or GOOGLE_CLIENT_SECRET.", 501, "not-configured");
+  if (!secret) throw new GscError("Set GSC_COOKIE_SECRET to encrypt Search Console credentials.", 501, "not-configured");
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await cookieKey(secret), enc.encode(plain));
   return `v1.${b64url(iv)}.${b64url(ct)}`;
@@ -147,7 +151,7 @@ async function tokenRequest(body: Record<string, string>): Promise<{ access_toke
   const data = (await res.json().catch(() => ({}))) as { access_token?: string; expires_in?: number; refresh_token?: string; id_token?: string; error?: string; error_description?: string };
   if (!res.ok || !data.access_token) {
     if (data.error === "invalid_grant") throw new GscError("Your Google connection expired or was revoked. Connect Search Console again.", 401, "not-connected");
-    if (data.error === "invalid_client" || data.error === "unauthorized_client") throw new GscError("Google rejected this server's OAuth client or service account. Check GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET or GSC_SERVICE_ACCOUNT_JSON.", 502, "config");
+    if (data.error === "invalid_client" || data.error === "unauthorized_client") throw new GscError("Google rejected the OAuth client or service account. An admin should check the Google client ID and secret in Settings.", 502, "config");
     throw new GscError(`Google token request failed (${data.error ?? `HTTP ${res.status}`}).`, 502, "google");
   }
   return { access_token: data.access_token, expires_in: data.expires_in ?? 3600, refresh_token: data.refresh_token, id_token: data.id_token };
@@ -155,18 +159,33 @@ async function tokenRequest(body: Record<string, string>): Promise<{ access_toke
 
 // ---------------------------------------------------------------- OAuth
 
-export function oauthConfigured(): boolean {
-  return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+/** A Google OAuth client (Web application). Workspaces bring their own, saved in Settings (see gsc-auth.ts). */
+export interface OAuthClient {
+  id: string;
+  secret: string;
 }
+
+/**
+ * The environment's client, only for servers without accounts (no D1 or no Clerk), where there's no workspace to
+ * save one in. Servers with accounts never read it.
+ */
+export function envClient(): OAuthClient | null {
+  const id = process.env.GOOGLE_CLIENT_ID?.trim();
+  const secret = process.env.GOOGLE_CLIENT_SECRET?.trim();
+  return id && secret ? { id, secret } : null;
+}
+
+export const validClientId = (v: unknown): v is string => typeof v === "string" && v.length <= 200 && /^[\w.-]+\.apps\.googleusercontent\.com$/.test(v);
+export const validClientSecret = (v: unknown): v is string => typeof v === "string" && v.length >= 8 && v.length <= 200 && /^[\x21-\x7e]+$/.test(v);
 
 /** Must be registered as an authorised redirect URI on the OAuth client in Google Cloud. */
 export function redirectUri(origin: string): string {
   return process.env.GSC_REDIRECT_URI || `${origin.replace(/\/+$/, "")}/api/gsc/callback`;
 }
 
-export function authUrl(origin: string, state: string): string {
+export function authUrl(origin: string, state: string, client: OAuthClient): string {
   const q = new URLSearchParams({
-    client_id: process.env.GOOGLE_CLIENT_ID ?? "",
+    client_id: client.id,
     redirect_uri: redirectUri(origin),
     response_type: "code",
     scope: OAUTH_SCOPES,
@@ -197,11 +216,11 @@ export function idTokenEmail(idToken: string | undefined): string | null {
 export const connectionKey = async (refreshToken: string) => `rt:${await sha256Hex(refreshToken)}`;
 
 /** Exchange the authorization code; returns the refresh token and the Google account (and primes the access-token cache). */
-export async function exchangeCode(code: string, origin: string): Promise<{ refreshToken: string; email: string | null }> {
+export async function exchangeCode(code: string, origin: string, client: OAuthClient): Promise<{ refreshToken: string; email: string | null }> {
   const t = await tokenRequest({
     code,
-    client_id: process.env.GOOGLE_CLIENT_ID ?? "",
-    client_secret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+    client_id: client.id,
+    client_secret: client.secret,
     redirect_uri: redirectUri(origin),
     grant_type: "authorization_code",
   });
@@ -211,14 +230,14 @@ export async function exchangeCode(code: string, origin: string): Promise<{ refr
 }
 
 /** An access token for a stored refresh token, cached per connection. Throws GscError "not-connected" on a revoked/expired grant. */
-export async function oauthAccessToken(refreshToken: string): Promise<string> {
+export async function oauthAccessToken(refreshToken: string, client: OAuthClient): Promise<string> {
   const key = await connectionKey(refreshToken);
   const hit = cached(key);
   if (hit) return hit;
   try {
     const t = await tokenRequest({
-      client_id: process.env.GOOGLE_CLIENT_ID ?? "",
-      client_secret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      client_id: client.id,
+      client_secret: client.secret,
       refresh_token: refreshToken,
       grant_type: "refresh_token",
     });

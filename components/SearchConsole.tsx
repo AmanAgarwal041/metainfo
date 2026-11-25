@@ -54,6 +54,8 @@ const UNKNOWN: GscStatus = {
   mode: "none",
   connected: false,
   oauthConfigured: false,
+  client: null,
+  redirectUri: "",
   accounts: false,
   signedIn: false,
   role: null,
@@ -93,6 +95,17 @@ export function useGscStatus(projectId?: string): GscStatus | null {
 export async function connectGsc(returnTo: "/search-console" | "/settings" = "/search-console"): Promise<void> {
   const { url } = await gsc<{ url: string }>("connect", { return: returnTo });
   window.location.assign(url);
+}
+
+async function saveGscClient(clientId: string, clientSecret: string): Promise<{ disconnected: boolean }> {
+  const out = await gsc<{ disconnected: boolean }>("client", { clientId, clientSecret }, "PUT");
+  notify();
+  return out;
+}
+
+async function removeGscClient() {
+  await gsc("client", {}, "DELETE");
+  notify();
 }
 
 export async function disconnectGsc() {
@@ -158,8 +171,8 @@ const FLASH: Record<string, string> = {
   denied: "Google sign-in was cancelled, so nothing was connected.",
   state: "The sign-in link expired or didn't match this browser. Try connecting again.",
   google: "Google didn't complete the sign-in. Try again; if it keeps failing, check the OAuth client's redirect URI.",
-  config: "Google rejected this server's OAuth client. Check GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.",
-  "not-configured": "Search Console OAuth isn't configured on this server.",
+  config: "Google rejected the OAuth client. An admin should check the client ID and secret in Settings.",
+  "not-configured": "Add this workspace's Google OAuth client in Settings first.",
   "sign-in": "Sign in to connect Search Console for your team.",
 };
 
@@ -411,6 +424,115 @@ function ConnectButton({ returnTo, label = "Connect Google Search Console", smal
   );
 }
 
+/**
+ * An admin enters the workspace's own Google OAuth client (Web application). The secret is write-only: it's sealed on
+ * the server and never sent back, so the form only shows whether one is saved.
+ */
+function ClientForm({ status }: { status: GscStatus }) {
+  const saved = status.client;
+  const [open, setOpen] = useState(!saved || saved.unreadable);
+  const [id, setId] = useState(saved?.id ?? "");
+  const [secret, setSecret] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const changingId = Boolean(saved && id.trim() && id.trim() !== saved.id);
+  const needSecret = !saved || changingId || saved.unreadable;
+  const note = msg && <span className="small" style={{ color: msg.ok ? "var(--pass)" : "var(--fail)" }}>{msg.text}</span>;
+
+  if (!status.canManage) {
+    return <p className="small muted" style={{ margin: 0 }}>{saved ? `Google OAuth client ${saved.id}.` : "No Google OAuth client yet."} Only admins can change it.</p>;
+  }
+  if (saved && !open) {
+    return (
+      <div className="row" style={{ gap: 8 }}>
+        <span className="badge">OAuth client {saved.id.replace(/\.apps\.googleusercontent\.com$/, "")}</span>
+        <button className="btn btn-sm btn-ghost" onClick={() => setOpen(true)}>
+          Change client
+        </button>
+        {note}
+      </div>
+    );
+  }
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setMsg(null);
+    try {
+      const { disconnected } = await saveGscClient(id.trim(), secret.trim());
+      setSecret("");
+      setOpen(false);
+      setMsg({ ok: true, text: disconnected ? "Saved. The old connection was removed: connect again with the new client." : "Saved." });
+    } catch (err) {
+      setMsg({ ok: false, text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await removeGscClient();
+      setId("");
+      setMsg({ ok: true, text: "Removed the client and the Search Console connection." });
+    } catch (err) {
+      setMsg({ ok: false, text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form className="stack" style={{ gap: 10 }} onSubmit={save}>
+      <div className="field-label">Google OAuth client for this workspace</div>
+      <p className="small muted" style={{ margin: 0 }}>
+        In Google Cloud, enable the <b>Google Search Console API</b>, create an OAuth client of type <b>Web application</b>, and add <code>{status.redirectUri}</code>{" "}
+        <CopyText text={status.redirectUri} /> as an authorised redirect URI. Each workspace uses its own client. The secret is encrypted on the server and never shown again.
+      </p>
+      {saved?.unreadable && <p className="small" style={{ margin: 0, color: "var(--fail)" }}>The saved secret can&apos;t be read any more (the server&apos;s encryption key changed). Enter it again.</p>}
+      <div className="row" style={{ gap: 8 }}>
+        <input className="input" style={{ maxWidth: 380 }} value={id} onChange={(e) => setId(e.target.value)} placeholder="Client ID (….apps.googleusercontent.com)" aria-label="Google OAuth client ID" autoComplete="off" spellCheck={false} />
+        <input className="input" style={{ maxWidth: 260 }} type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={needSecret ? "Client secret" : "Client secret (saved)"} aria-label="Google OAuth client secret" autoComplete="new-password" />
+        <button className="btn btn-primary btn-sm" disabled={busy || !id.trim() || (needSecret && !secret.trim())}>
+          {busy ? "Saving" : "Save"}
+        </button>
+        {saved && !saved.unreadable && (
+          <button type="button" className="btn btn-sm btn-ghost" onClick={() => (setOpen(false), setId(saved.id), setSecret(""), setMsg(null))}>
+            Cancel
+          </button>
+        )}
+        {saved && (
+          <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={remove}>
+            Remove
+          </button>
+        )}
+      </div>
+      {changingId && status.mode === "org" && <p className="small" style={{ margin: 0, color: "var(--fail)" }}>A different client ID ends the current connection; connect again afterwards.</p>}
+      {note}
+    </form>
+  );
+}
+
+function CopyText({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  if (!text) return null;
+  return (
+    <button
+      type="button"
+      className="btn btn-sm btn-ghost"
+      onClick={() =>
+        navigator.clipboard?.writeText(text).then(
+          () => {
+            setDone(true);
+            setTimeout(() => setDone(false), 1500);
+          },
+          () => undefined,
+        )
+      }
+    >
+      {done ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
 function ConnectPanel({ status, workspace, onToken }: { status: GscStatus; workspace?: string; onToken: () => void }) {
   const tokenBox = status.serviceAccountLocked && (
     <>
@@ -418,6 +540,34 @@ function ConnectPanel({ status, workspace, onToken }: { status: GscStatus; works
       <p className="small muted">This server can also read Search Console with its service account. Enter its RESEARCH_TOKEN to use it.</p>
     </>
   );
+  if (!status.oauthConfigured && status.accounts) {
+    return (
+      <>
+        {status.signedIn ? (
+          <div className="card card-pad">
+            <h2 className="section-title">Set up Search Console for {workspace ?? "this workspace"}</h2>
+            <p className="section-sub">
+              {status.canManage
+                ? "Add your workspace's Google OAuth client, then connect Google once for everyone in the workspace."
+                : "An admin of the workspace needs to add its Google OAuth client and connect Google. Once they do, everyone in the workspace sees the data."}
+            </p>
+            <ClientForm status={status} />
+          </div>
+        ) : (
+          <div className="card card-pad gsc-connect">
+            <div style={{ flex: 1, minWidth: 260 }}>
+              <h2 className="section-title">Sign in to set up Search Console for your team</h2>
+              <p className="section-sub" style={{ marginBottom: 0 }}>Each workspace uses its own Google OAuth client, added by an admin.</p>
+            </div>
+            <Link className="btn btn-primary" href="/login">
+              Sign in
+            </Link>
+          </div>
+        )}
+        {tokenBox}
+      </>
+    );
+  }
   if (!status.oauthConfigured) {
     if (status.serviceAccountLocked) return <>{tokenBox}</>;
     return (
@@ -426,7 +576,7 @@ function ConnectPanel({ status, workspace, onToken }: { status: GscStatus; works
           title="Search Console isn't set up on this server"
           body={
             <>
-              Add one of these to the server&apos;s environment, then reload. <b>OAuth</b> (an admin connects Google once for the whole workspace):{" "}
+              This server has no workspaces (no D1 database or no Clerk keys), so add one of these to its environment, then reload. <b>OAuth</b>:{" "}
               <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> from a Google Cloud OAuth client (Web application) with the Search Console API enabled, and{" "}
               <code>{typeof window === "undefined" ? "" : window.location.origin}/api/gsc/callback</code> as an authorised redirect URI. Optionally <code>GSC_COOKIE_SECRET</code> to encrypt the
               stored connection. <b>Service account</b> (self-hosting and MCP): <code>GSC_SERVICE_ACCOUNT_JSON</code> with the key file&apos;s JSON, and add the service account&apos;s email as a
@@ -1002,15 +1152,23 @@ export function GscConnection() {
       : !status.oauthConfigured
         ? status.serviceAccountLocked
           ? "Service account needs the access token"
-          : "Not configured on this server"
+          : !status.accounts
+            ? "Not configured on this server"
+            : !status.signedIn
+              ? "Sign in to set it up for your team"
+              : status.canManage
+                ? "Add this workspace's Google OAuth client"
+                : "Not set up: ask an admin to add it"
         : status.accounts && !status.signedIn
           ? "Sign in to connect for your team"
           : status.canManage
             ? "Not connected"
             : "Not connected: ask an admin to connect it";
   return (
-    <div className="row">
-      <span className={`badge ${usable ? "gain" : ""}`}>{label}</span>
+    <div className="stack" style={{ gap: 12 }}>
+      {status.accounts && status.signedIn && <ClientForm key={status.client?.id ?? "none"} status={status} />}
+      <div className="row">
+        <span className={`badge ${usable ? "gain" : ""}`}>{label}</span>
       {status.oauthConfigured && status.canManage && (status.mode === "none" || status.mode === "service-account" || status.lastError) && (
         <ConnectButton small returnTo="/settings" label={status.lastError ? "Reconnect" : "Connect Google Search Console"} />
       )}
@@ -1024,9 +1182,10 @@ export function GscConnection() {
           Disconnect
         </button>
       )}
-      <Link className="btn btn-sm btn-ghost" href="/search-console">
-        Open Search Console
-      </Link>
+        <Link className="btn btn-sm btn-ghost" href="/search-console">
+          Open Search Console
+        </Link>
+      </div>
     </div>
   );
 }
