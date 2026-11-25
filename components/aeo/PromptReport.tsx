@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { nameOf, OPPORTUNITY_KINDS, SOURCE_TYPES, type Answer, type Brand } from "@/lib/aeo";
+import { nameOf, OPPORTUNITY_KINDS, SOURCE_TYPES, type Answer, type Brand, type Opportunity } from "@/lib/aeo";
+import { actionId } from "@/lib/aeo-actions";
 import { engineChange, PROMPT_STATUS, promptReports, type EngineRow, type PromptReport as Report, type PromptStatus } from "@/lib/aeo-prompt";
 import { fromOpportunity, type PromptContext } from "@/lib/fix-prompts";
 import { AI_ENGINES, type AiEngine } from "@/lib/research-types";
@@ -49,7 +50,7 @@ function Change({ e }: { e: EngineRow }) {
   );
 }
 
-function Detail({ r, you, ctx, onSimulate }: { r: Report; you: string; ctx: PromptContext; onSimulate: (prompt: string, engine?: AiEngine) => void }) {
+function Detail({ r, you, ctx, onSimulate, tracked, onTrack }: { r: Report; you: string; ctx: PromptContext; onSimulate: (prompt: string, engine?: AiEngine) => void; tracked?: Set<string>; onTrack?: (o: Opportunity) => void }) {
   const fixes = useMemo(() => r.plan.map(fromOpportunity), [r.plan]);
   const picker = useFixPicker();
   const cls = { high: "s-fail", medium: "s-warn", low: "s-info" };
@@ -206,7 +207,15 @@ function Detail({ r, you, ctx, onSimulate }: { r: Report; you: string; ctx: Prom
                       ))}
                     </ul>
                   )}
-                  <FixPromptButton fix={fixes[k]} ctx={ctx} />
+                  <div className="row" style={{ gap: 8, alignItems: "flex-start" }}>
+                    <FixPromptButton fix={fixes[k]} ctx={ctx} />
+                    {onTrack &&
+                      (tracked?.has(actionId(o)) ? (
+                        <span className="badge gain" style={{ marginTop: 4 }}>Tracked in Actions</span>
+                      ) : (
+                        <button className="btn btn-sm" onClick={() => onTrack(o)}>Track as action</button>
+                      ))}
+                  </div>
                 </div>
               </details>
             ))}
@@ -227,6 +236,8 @@ export default function PromptReport({
   domain,
   initial,
   onSimulate,
+  tracked,
+  onTrack,
 }: {
   answers: Answer[];
   /** The run before, for "since last run". */
@@ -236,6 +247,8 @@ export default function PromptReport({
   domain: string;
   initial: { prompt: string; nonce: number } | null;
   onSimulate: (prompt: string, engine?: AiEngine) => void;
+  tracked?: Set<string>;
+  onTrack?: (o: Opportunity) => void;
 }) {
   const reports = useMemo(() => promptReports(answers, brands, brand, previous), [answers, brands, brand, previous]);
   const [filter, setFilter] = useState<PromptStatus | "all">("all");
@@ -286,7 +299,7 @@ export default function PromptReport({
           ))}
         </div>
       </div>
-      <div className="prompt-report-detail">{current && <Detail key={current.prompt} r={current} you={brands[0].domain} ctx={ctx} onSimulate={onSimulate} />}</div>
+      <div className="prompt-report-detail">{current && <Detail key={current.prompt} r={current} you={brands[0].domain} ctx={ctx} onSimulate={onSimulate} tracked={tracked} onTrack={onTrack} />}</div>
     </div>
   );
 }

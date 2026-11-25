@@ -7,6 +7,7 @@ import { LOCATIONS } from "@/lib/research-types";
 import { setTheme, useTheme } from "@/lib/theme";
 import { PageHead } from "./kit";
 import { useResearchStatus } from "./research/common";
+import { GscConnection } from "./SearchConsole";
 import { CodeBlock, CopyButton, download } from "./ui";
 import { removeLocal, setLocal } from "@/lib/store";
 
@@ -210,6 +211,30 @@ export default function Settings() {
     null,
     2,
   );
+  const authHeaders: Record<string, string> = status?.ownKeys
+    ? { "x-dataforseo-login": "YOUR_LOGIN", "x-dataforseo-password": "YOUR_API_PASSWORD" }
+    : status?.tokenRequired
+      ? { Authorization: "Bearer YOUR_RESEARCH_TOKEN" }
+      : {};
+  const hasAuth = Object.keys(authHeaders).length > 0;
+  const vscodeJson = JSON.stringify({ servers: { metainfo: { type: "http", url: mcpUrl, ...(hasAuth ? { headers: authHeaders } : {}) } } }, null, 2);
+  const pythonSnippet = [
+    "# pip install mcp",
+    "import asyncio",
+    "from mcp import ClientSession",
+    "from mcp.client.streamable_http import streamablehttp_client",
+    "",
+    "async def main():",
+    `    async with streamablehttp_client("${mcpUrl}"${hasAuth ? `, headers=${JSON.stringify(authHeaders)}` : ""}) as (read, write, _):`,
+    "        async with ClientSession(read, write) as session:",
+    "            await session.initialize()",
+    "            tools = await session.list_tools()  # hand these to your LLM",
+    '            result = await session.call_tool("audit_page", {"url": "https://example.com", "include_fix_prompt": True})',
+    "            print(result.structuredContent)",
+    "",
+    "asyncio.run(main())",
+  ].join("\n");
+  const curlSnippet = `curl -s ${mcpUrl} -H 'content-type: application/json'${Object.entries(authHeaders).map(([k, v]) => ` -H '${k}: ${v}'`).join("")} \\\n  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"suggest_ai_prompts","arguments":{"category":"LLM observability tool"}}}'`;
   const markMcp = () => {
     try {
       localStorage.setItem("metainfo:mcp-copied", "1");
@@ -259,21 +284,38 @@ export default function Settings() {
           )}
         </Section>
 
-        <Section id="mcp" title="Connect an AI agent (MCP)" sub="Let Claude Code, Cursor or any MCP client run audits, keyword research, SERP checks, gap analysis and backlink lookups through this server.">
+        <Section id="search-console" title="Google Search Console" sub="Real Google clicks, impressions and positions for your own site. Connect your Google account (read-only), or have the server use a service account for self-hosting and MCP.">
+          <GscConnection />
+        </Section>
+
+        <Section id="mcp" title="Connect an AI agent (MCP)" sub="Let Claude Code, Cursor, VS Code or any agent workflow run audits, AI visibility checks, citation plans, keyword research, SERP checks and backlink lookups through this server.">
           <div className="field-label" style={{ marginBottom: 6 }}>Claude Code</div>
           <div onCopy={markMcp}>
             <CodeBlock code={`claude mcp add --transport http metainfo ${mcpUrl}${authArg}`} />
           </div>
-          <div className="field-label" style={{ margin: "14px 0 6px" }}>Cursor and other clients (mcp.json)</div>
+          <div className="field-label" style={{ margin: "14px 0 6px" }}>Cursor, Windsurf and other clients (mcp.json)</div>
           <div onCopy={markMcp}>
             <CodeBlock code={cursorJson} />
           </div>
+          <div className="field-label" style={{ margin: "14px 0 6px" }}>VS Code (.vscode/mcp.json)</div>
+          <div onCopy={markMcp}>
+            <CodeBlock code={vscodeJson} />
+          </div>
+          <details style={{ marginTop: 14 }}>
+            <summary className="field-label" style={{ cursor: "pointer" }}>Your own agent (Python MCP SDK, or plain HTTP)</summary>
+            <div onCopy={markMcp} style={{ marginTop: 6 }}>
+              <CodeBlock code={pythonSnippet} />
+            </div>
+            <div onCopy={markMcp} style={{ marginTop: 10 }}>
+              <CodeBlock code={curlSnippet} />
+            </div>
+          </details>
           <div className="row" style={{ marginTop: 10 }}>
             <CopyButton text={mcpUrl} label="Copy server URL" />
             <button className="btn btn-sm btn-ghost" onClick={markMcp}>I&apos;ve connected it</button>
           </div>
           <p className="muted small" style={{ marginTop: 10 }}>
-            Tools: audit_page (free), keyword_ideas (free ideas, volumes with DataForSEO), serp_check, keyword_gap, find_competitors and backlinks. Paid tools are hidden until DataForSEO is configured.
+            Free tools: audit_page, validate_schema, keyword_ideas (ideas; volumes with DataForSEO), suggest_ai_prompts and simulate_ai_citation. With DataForSEO: ai_visibility_check (per-prompt citations and a plan), ask_ai_engine, serp_check, keyword_gap, find_competitors and backlinks; they&apos;re hidden until it&apos;s configured. With a Search Console service account on the server: search_console_report and search_console_inspect_url. Ready-made workflows (MCP prompts): improve_ai_citations, ai_visibility_baseline and seo_audit_and_fix.
           </p>
         </Section>
 

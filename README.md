@@ -87,8 +87,9 @@ HTTP 422 when the overall score is below the threshold, so `curl -f` fails the p
 curl -f "https://metainfo.agarwal-aman041.workers.dev/api/report?url=example.com/pricing&format=summary&min=80"
 ```
 
-The MCP server speaks Streamable HTTP. `audit_page`, `validate_schema` and `keyword_ideas` are free; the research tools appear once
-DataForSEO is configured ([details](#mcp-server)).
+The MCP server speaks Streamable HTTP, so any agent workflow can use it: Claude Code, Cursor, VS Code, or your own agent through an
+MCP SDK. It covers audits, AI visibility (per-prompt citations and a plan to improve them), keyword, SERP and backlink research, plus
+ready-made workflows ([details](#mcp-server)).
 
 ```bash
 claude mcp add --transport http metainfo https://metainfo.agarwal-aman041.workers.dev/api/mcp
@@ -181,17 +182,93 @@ RESEARCH_TOKEN=some-secret                # strongly recommended when deployed
 * **Audit tabs** can be linked directly: `/audit?url=example.com&tab=plan` (also `crawlers`, `geo`, `rendering`, `schema`, `tags`, `previews`, `generated`, `history`, `issues`).
 * **Command palette (⌘K):** jump to any page, audit a URL, research a keyword, check a SERP, switch or create projects, change theme.
 
-## MCP server
+## Google Search Console
 
-`/api/mcp` implements MCP over Streamable HTTP. It's stateless JSON-RPC, protected by `RESEARCH_TOKEN` when that's set.
+`/search-console` shows the clicks, impressions, CTR and average positions Google itself records for your own site, compared
+with the previous period of the same length (7 days to 16 months; filter by country, device and web/image/video/news/Discover).
+Below the trend charts it lists **opportunities**, each with an estimated click gain (from a typical CTR-by-position curve) and
+steps: striking-distance queries (positions 4 to 20), top-5 queries with a low click-through (fix the snippet), cannibalisation
+(two or more of your pages splitting a query), the biggest decliners, and question or comparison queries worth answer-first
+content for AI Overviews. Then top queries and pages (searchable, CSV export), countries, devices, search appearance and a
+**URL inspection** box (index status, coverage, last crawl, your canonical vs Google's, mobile usability, rich results).
+
+There are two ways to authenticate, and both can be set:
+
+* **OAuth (each visitor connects their own Google account).** In Google Cloud, enable the *Google Search Console API*, create an
+  OAuth client of type *Web application*, and add `https://your-host/api/gsc/callback` (and `http://localhost:3000/api/gsc/callback`
+  for development) as an authorised redirect URI. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. The app asks for the read-only
+  `webmasters.readonly` scope with offline access. The refresh token is kept in an HttpOnly, SameSite=Lax cookie (Secure except on
+  localhost, sent only to `/api/gsc/*`), AES-GCM encrypted with a key derived from `GSC_COOKIE_SECRET` (falls back to the client
+  secret; set it so rotating the client secret doesn't sign everyone out). It never reaches browser JavaScript. Disconnecting
+  clears the cookie and revokes the grant. `GSC_REDIRECT_URI` overrides the redirect URI when the app sits behind a proxy that
+  changes the origin.
+* **Service account (self-hosting and MCP).** Create a service account and a JSON key in Google Cloud (same project, API enabled),
+  put the key file's JSON (or the same, base64-encoded) in `GSC_SERVICE_ACCOUNT_JSON`, and in Search Console open
+  *Settings > Users and permissions* and add the service account's `client_email` as a user (Restricted is enough). Because it
+  reads the server owner's data, the service account is only used for callers that present `RESEARCH_TOKEN` when that's set
+  (own DataForSEO keys don't count): **set `RESEARCH_TOKEN` on any public deployment that has a service account.**
+
+A connected Google account wins over the service account. Access tokens are cached in memory until shortly before they expire.
+Everything uses `fetch` and Web Crypto (the service-account JWT is signed with RS256 in Web Crypto), so it runs on Workers.
 
 ```bash
-claude mcp add --transport http metainfo http://localhost:3000/api/mcp
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
+npx wrangler secret put GSC_COOKIE_SECRET          # any long random string
+npx wrangler secret put GSC_SERVICE_ACCOUNT_JSON   # optional, for MCP / self-hosting
 ```
 
-Tools:
-* Free: `audit_page`, `validate_schema`, and `keyword_ideas` (ideas only; volumes need DataForSEO).
-* Need DataForSEO: `serp_check`, `keyword_gap`, `find_competitors`, `backlinks`, `ask_ai_engine`. These are hidden from the tool list until it's configured.
+API: `GET /api/gsc/status`, `GET /api/gsc/sites`, `POST /api/gsc/report {site, days, country?, device?, search_type?}`,
+`POST /api/gsc/inspect {site, url}`. With a service account, MCP clients get `search_console_report` and
+`search_console_inspect_url`.
+
+## MCP server
+
+`/api/mcp` implements MCP over Streamable HTTP: stateless JSON-RPC, CORS-enabled for browser clients, and protected by
+`RESEARCH_TOKEN` when that's set. Callers can bring their own DataForSEO keys in `x-dataforseo-login` and `x-dataforseo-password` headers.
+
+```bash
+# Claude Code
+claude mcp add --transport http metainfo https://metainfo.agarwal-aman041.workers.dev/api/mcp
+```
+
+```jsonc
+// Cursor, Windsurf: mcp.json. VS Code: .vscode/mcp.json uses "servers" and "type": "http".
+{ "mcpServers": { "metainfo": { "url": "https://metainfo.agarwal-aman041.workers.dev/api/mcp" } } }
+```
+
+```python
+# Any agent: the MCP Python SDK (pip install mcp). Hand session.list_tools() to your model.
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+async with streamablehttp_client("https://metainfo.agarwal-aman041.workers.dev/api/mcp") as (read, write, _):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        result = await session.call_tool("suggest_ai_prompts", {"category": "LLM observability tool"})
+```
+
+**Tools.** Each one returns JSON as text and as `structuredContent`. All of them are marked read-only.
+
+| Tool | Cost | What it does |
+| --- | --- | --- |
+| `audit_page` | free | 55+ SEO and AI-readiness checks with per-platform scores. `include_fix_prompt` adds a prompt a coding agent can apply. |
+| `validate_schema` | free | schema.org and Google rich-result validation for a URL or snippet. |
+| `keyword_ideas` | free / DataForSEO | Long-tail ideas, with volume, difficulty and CPC when DataForSEO is set. |
+| `suggest_ai_prompts` | free | The questions buyers ask AI assistants for a category, by type and funnel stage. |
+| `simulate_ai_citation` | free | Your page against the pages an engine cited, read as that engine's crawler, with factor gaps and fixes. |
+| `ai_visibility_check` | DataForSEO | Prompts × engines (ChatGPT, Claude, Gemini, Perplexity, Google AI Overviews). For each prompt it reports cited, named or absent, the position, who is ahead, the cited pages and a plan. Also visibility, share of voice and opportunities. Capped by `max_answers`. |
+| `ask_ai_engine` | DataForSEO | One raw answer, with mention, citation, position and sentiment. |
+| `serp_check`, `keyword_gap`, `find_competitors`, `backlinks` | DataForSEO | Live Google results, keyword gap, organic competitors, backlink profile and link gap. |
+| `search_console_report` | free, service account | Real Google clicks, impressions, CTR and positions for a property, vs the previous period, with top queries and pages and opportunities (striking distance, low CTR, cannibalisation, decliners, answer-first). |
+| `search_console_inspect_url` | free, service account | Google's index status, last crawl and chosen canonical for a URL. |
+
+Paid tools are hidden from `tools/list` until DataForSEO is configured, either on the server or through the caller's own key headers. The Search Console tools appear when `GSC_SERVICE_ACCOUNT_JSON` is set, and need `RESEARCH_TOKEN` as a bearer token when one is configured.
+
+**Workflows (MCP prompts).** `prompts/list` offers three:
+* `improve_ai_citations`: check the given prompts, simulate the weakest one, and produce a single plan.
+* `ai_visibility_baseline`: pick prompts for a category, measure against competitors, and list the top opportunities.
+* `seo_audit_and_fix`: audit a URL, then fix the issues in the current codebase.
 
 ## Design system
 

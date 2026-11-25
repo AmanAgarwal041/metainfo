@@ -2,17 +2,22 @@
 
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { analyzeAnswer, type Answer, type BrandResult } from "@/lib/aeo";
-import { loadRuns, rates, saveRun, type AiRun, type Observation } from "@/lib/ai-visibility";
+import { analyzeAnswer, opportunities, type Answer, type BrandResult, type Opportunity } from "@/lib/aeo";
+import { loadActions, saveActions, trackAction, type AeoAction, type ActionStatus, type RunAnswers } from "@/lib/aeo-actions";
+import type { PromptContext } from "@/lib/fix-prompts";
+import { loadRuns, saveRun, type AiRun, type Observation } from "@/lib/ai-visibility";
 import { loadSites, siteForDomain, type TrackedSite } from "@/lib/history";
 import { useProject } from "@/lib/project";
 import { postResearch, research } from "@/lib/research-client";
 import { AI_ENGINES, type AiAnswer, type AiEngine } from "@/lib/research-types";
-import { LineChart } from "../charts";
 import { IconCheck } from "../icons";
 import { EmptyState, PageHead } from "../kit";
 import PromptManager from "../aeo/PromptManager";
-import { Citations, Opportunities, Overview, PromptTable } from "../aeo/Results";
+import { PromptTable } from "../aeo/Results";
+import Dashboard from "../aeo/Dashboard";
+import CitationsView from "../aeo/CitationsView";
+import Actions from "../aeo/Actions";
+import Impact from "../aeo/Impact";
 import { brandResults, brandsOf, SentimentBadge } from "../aeo/shared";
 import PromptReport from "../aeo/PromptReport";
 import Simulator from "../aeo/Simulator";
@@ -72,7 +77,7 @@ function Readiness({ site }: { site: TrackedSite | null }) {
   );
 }
 
-type Tab = "overview" | "prompts" | "by-prompt" | "citations" | "opportunities" | "simulate";
+type Tab = "overview" | "prompts" | "by-prompt" | "citations" | "actions" | "impact" | "simulate" | "setup";
 
 export default function AiVisibility() {
   const [project, update] = useProject();
@@ -84,15 +89,17 @@ export default function AiVisibility() {
   const [confirm, setConfirm] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [fatal, setFatal] = useState<unknown>(null);
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab | null>(null);
   const [viewing, setViewing] = useState<Observation | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [simulate, setSimulate] = useState<{ prompt: string; engine?: AiEngine; nonce: number } | null>(null);
   const [report, setReport] = useState<{ prompt: string; nonce: number } | null>(null);
+  const [actions, setActions] = useState<AeoAction[]>([]);
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- browser-stored runs and audits for the active project */
     setRuns(project.id ? loadRuns(project.id) : []);
+    setActions(project.id ? loadActions(project.id) : []);
     setSite(siteForDomain(loadSites(), project.domain));
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [project.id, project.domain]);
@@ -104,6 +111,20 @@ export default function AiVisibility() {
   const answerList: Answer[] = observations;
   const prev = runs.at(-2);
   const previous = useMemo<Answer[]>(() => (prev?.observations ?? []).map((o) => ({ ...o, brands: brandResults(o, brands) })), [prev, brands]);
+  const history = useMemo<RunAnswers[]>(() => runs.map((r) => ({ at: r.at, answers: r.observations.map((o) => ({ ...o, brands: brandResults(o, brands) })) })), [runs, brands]);
+  const suggestions = useMemo(() => opportunities(answerList, brands, brand), [answerList, brands, brand]);
+  const ctx = useMemo<PromptContext>(() => ({ site: project.domain ? `https://${project.domain}` : brand, source: `AI visibility run (brand: ${brand})` }), [project.domain, brand]);
+  const track = (os: Opportunity[], status: ActionStatus = "todo") => {
+    const latest = history.at(-1);
+    if (!latest || !project.id) return;
+    const have = new Set(actions.map((a) => a.id));
+    const added = os.map((o) => ({ ...trackAction(o, latest, project.domain), status })).filter((a) => !have.has(a.id));
+    setActions(saveActions(project.id, [...actions, ...added]));
+  };
+  const updateAction = (id: string, patch: Partial<AeoAction>) => {
+    setActions(saveActions(project.id, actions.map((a) => (a.id === id ? { ...a, ...patch, updatedAt: new Date().toISOString() } : a))));
+  };
+  const trackedIds = useMemo(() => new Set(actions.map((a) => a.id)), [actions]);
   const engineList = AI_ENGINES.filter((e) => engines.has(e.id));
   const calls = project.prompts.length * engineList.length;
   const llm = !!status?.llm;
@@ -170,6 +191,7 @@ export default function AiVisibility() {
     setReport({ prompt, nonce: Date.now() });
     setTab("by-prompt");
   };
+  const active: Tab = tab ?? (last ? "overview" : "setup");
   const terms = [brand, project.domain, ...project.aliases, ...brands.slice(1).map((b) => b.name)];
 
   return (
@@ -186,50 +208,6 @@ export default function AiVisibility() {
         }
       />
       <div className="stack">
-        <section className="card card-pad">
-          <h2 className="section-title">AI readiness <span className="badge gain">free</span></h2>
-          <p className="section-sub">What AI engines need before they can cite you, from your latest audit.</p>
-          <Readiness site={site} />
-        </section>
-
-        {status && !status.dataforseo && (
-          <ProviderNotice
-            unlocks="AI answer monitoring"
-            free={<>Answers come from DataForSEO&apos;s AI Optimization API (live ChatGPT, Claude, Gemini and Perplexity responses with web search) and Google AI Overviews. You can set up prompts and simulate agents now.</>}
-          />
-        )}
-
-        <PromptManager project={project} brand={brand} update={update} />
-
-        <section className="card card-pad">
-          <div className="row" style={{ flexWrap: "wrap" }}>
-            <span className="small muted">Engines:</span>
-            {AI_ENGINES.map((e) => (
-              <button
-                key={e.id}
-                className="chip"
-                aria-pressed={engines.has(e.id)}
-                onClick={() => {
-                  const n = new Set(engines);
-                  if (n.has(e.id)) n.delete(e.id);
-                  else n.add(e.id);
-                  setEngines(n);
-                }}
-              >
-                <span className="dot" style={{ background: e.color }} /> {e.label}
-              </button>
-            ))}
-            <span className="spacer" />
-            {llm ? (
-              <label className="row small" style={{ gap: 6 }} title="Claude confirms which brands each answer really means and judges the tone. One extra Claude request per answer.">
-                <input type="checkbox" checked={judge} onChange={(e) => setJudge(e.currentTarget.checked)} /> Judge sentiment with Claude
-              </label>
-            ) : (
-              <span className="small muted" title="Set ANTHROPIC_API_KEY on the server to judge sentiment with Claude and to get written explanations in Simulate agents.">Sentiment: word lists (set ANTHROPIC_API_KEY for Claude)</span>
-            )}
-          </div>
-        </section>
-
         {confirm && (
           <div className="card card-pad row" role="alertdialog" aria-label="Confirm AI visibility check">
             <div style={{ flex: 1, minWidth: 240 }}>
@@ -255,21 +233,70 @@ export default function AiVisibility() {
         <div className="tabs" role="tablist">
           {(
             [
-              ["overview", "Overview"],
+              ["overview", "Dashboard"],
               ["prompts", "Prompts"],
               ["by-prompt", "By prompt"],
               ["citations", "Citations"],
-              ["opportunities", "Opportunities"],
+              ["actions", `Recommendations${actions.some((a) => a.status === "todo" || a.status === "doing") ? ` ${actions.filter((a) => a.status === "todo" || a.status === "doing").length}` : ""}`],
+              ["impact", "Impact"],
               ["simulate", "Simulate agents"],
+              ["setup", `Setup · ${project.prompts.length} prompts`],
             ] as [Tab, string][]
           ).map(([id, label]) => (
-            <button key={id} className="tab" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}>
+            <button key={id} className="tab" role="tab" aria-selected={active === id} onClick={() => setTab(id)}>
               {label}
             </button>
           ))}
         </div>
 
-        {tab === "simulate" ? (
+        {active === "setup" ? (
+          <>
+            <section className="card card-pad">
+              <h2 className="section-title">AI readiness <span className="badge gain">free</span></h2>
+              <p className="section-sub">What AI engines need before they can cite you, from your latest audit.</p>
+              <Readiness site={site} />
+            </section>
+
+            {status && !status.dataforseo && (
+              <ProviderNotice
+                unlocks="AI answer monitoring"
+                free={<>Answers come from DataForSEO&apos;s AI Optimization API (live ChatGPT, Claude, Gemini and Perplexity responses with web search) and Google AI Overviews. You can set up prompts and simulate agents now.</>}
+              />
+            )}
+
+            <PromptManager project={project} brand={brand} update={update} />
+
+            <section className="card card-pad">
+              <div className="row" style={{ flexWrap: "wrap" }}>
+                <span className="small muted">Engines:</span>
+                {AI_ENGINES.map((e) => (
+                  <button
+                    key={e.id}
+                    className="chip"
+                    aria-pressed={engines.has(e.id)}
+                    onClick={() => {
+                      const n = new Set(engines);
+                      if (n.has(e.id)) n.delete(e.id);
+                      else n.add(e.id);
+                      setEngines(n);
+                    }}
+                  >
+                    <span className="dot" style={{ background: e.color }} /> {e.label}
+                  </button>
+                ))}
+                <span className="spacer" />
+                {llm ? (
+                  <label className="row small" style={{ gap: 6 }} title="Claude confirms which brands each answer really means and judges the tone. One extra Claude request per answer.">
+                    <input type="checkbox" checked={judge} onChange={(e) => setJudge(e.currentTarget.checked)} /> Judge sentiment with Claude
+                  </label>
+                ) : (
+                  <span className="small muted" title="Set ANTHROPIC_API_KEY on the server to judge sentiment with Claude and to get written explanations in Simulate agents.">Sentiment: word lists (set ANTHROPIC_API_KEY for Claude)</span>
+                )}
+              </div>
+            </section>
+
+          </>
+        ) : active === "simulate" ? (
           <Simulator project={project} brand={brand} observations={observations} llm={llm} initial={simulate} />
         ) : !last ? (
           <div className="card">
@@ -289,59 +316,22 @@ export default function AiVisibility() {
               Last run {fmt(last.at)}: {last.observations.length} answers, ${last.cost.toFixed(3)}.
               {observations.some((o) => o.brands?.some((b) => b.judgedBy === "llm")) ? " Sentiment judged by Claude." : " Sentiment from word lists."}
             </p>
-            {tab === "overview" && (
-              <>
-                <Overview answers={answerList} brands={brands} brand={brand} />
-                {runs.length > 1 && (
-                  <section className="card card-pad">
-                    <h2 className="section-title">Visibility over time</h2>
-                    <div style={{ marginTop: 10 }}>
-                      <LineChart
-                        ariaLabel="Mention rate by engine over time"
-                        x={runs.map((r) => fmt(r.at))}
-                        yDomain={[0, 100]}
-                        format={(n) => `${n}%`}
-                        series={AI_ENGINES.map((e) => ({
-                          id: e.id,
-                          label: e.label,
-                          color: e.color,
-                          values: runs.map((r) => {
-                            const x = rates(r.observations.filter((o) => o.engine === e.id));
-                            return x.answered ? x.mentionRate : null;
-                          }),
-                        }))}
-                      />
-                    </div>
-                  </section>
-                )}
-              </>
-            )}
-            {tab === "prompts" && (
+            {active === "overview" && <Dashboard runs={history} brands={brands} brand={brand} />}
+            {active === "prompts" && (
               <section className="card card-pad">
-                <PromptTable observations={observations} brand={brand} brands={brands} onOpen={setViewing} onReport={openReport} />
+                <PromptTable observations={observations} previous={previous} brand={brand} brands={brands} onOpen={setViewing} onReport={openReport} />
               </section>
             )}
-            {tab === "by-prompt" && (
+            {active === "by-prompt" && (
               <section className="card card-pad">
-                <PromptReport answers={answerList} previous={previous} brands={brands} brand={brand} domain={project.domain} initial={report} onSimulate={openSim} />
+                <PromptReport answers={answerList} previous={previous} brands={brands} brand={brand} domain={project.domain} initial={report} onSimulate={openSim} tracked={trackedIds} onTrack={(o) => track([o])} />
               </section>
             )}
-            {tab === "citations" && (
-              <section className="card card-pad">
-                <h2 className="section-title">Which sources AI answers trust</h2>
-                <p className="section-sub">Every page the engines cited, by type. Click a type to filter. Sources that cite competitors but not you are where to earn mentions.</p>
-                <Citations answers={answerList} brands={brands} />
-              </section>
-            )}
-            {tab === "opportunities" && (
-              <section className="card card-pad">
-                <h2 className="section-title">What to do next</h2>
-                <p className="section-sub">From where competitors are named and you aren&apos;t, what gets cited, and how you&apos;re described. Most impactful first.</p>
-                <Opportunities answers={answerList} brands={brands} brand={brand} domain={project.domain} onSimulate={(p) => openSim(p)} />
-              </section>
-            )}
+            {active === "citations" && <CitationsView runs={history} brands={brands} />}
+            {active === "actions" && <Actions actions={actions} suggestions={suggestions} latest={history.at(-1) ?? null} runs={history} you={project.domain} ctx={ctx} onTrack={track} onUpdate={updateAction} />}
+            {active === "impact" && <Impact runs={history} brands={brands} actions={actions} projectId={project.id} domain={project.domain} />}
 
-            {viewing && tab === "prompts" && (
+            {viewing && active === "prompts" && (
               <section className="card card-pad">
                 <div className="panel-head">
                   <div>
