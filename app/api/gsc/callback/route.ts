@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { exchangeCode, GscError, oauthConfigured, openToken, safeEqual, sealToken, SESSION_COOKIE, STATE_COOKIE } from "@/lib/server/gsc";
+import { envClient, exchangeCode, GscError, openToken, safeEqual, sealToken, SESSION_COOKIE, STATE_COOKIE } from "@/lib/server/gsc";
 import { getDb } from "@/lib/server/db";
-import { gscContext, saveConnection } from "@/lib/server/gsc-auth";
+import { clientFor, gscContext, saveConnection } from "@/lib/server/gsc-auth";
 import { isLocalhost, sessionCookie } from "@/lib/server/gsc-route";
 
 export const runtime = "nodejs";
@@ -38,7 +38,6 @@ export async function GET(req: NextRequest) {
     return res;
   };
 
-  if (!oauthConfigured()) return done({ gsc_error: "not-configured" });
   const state = q.get("state") ?? "";
   if (!st || typeof st.s !== "string" || !state || !safeEqual(state, st.s) || !(st.e > Date.now())) return done({ gsc_error: "state" });
   if (q.get("error")) return done({ gsc_error: q.get("error") === "access_denied" ? "denied" : "google" });
@@ -49,11 +48,14 @@ export async function GET(req: NextRequest) {
     const { accounts } = await gscContext(req);
     // Servers with accounts only store connections for a workspace whose admin started the flow.
     if (accounts && !st.o) return done({ gsc_error: "state" });
-    const { refreshToken, email } = await exchangeCode(code, req.nextUrl.origin);
+    const db = st.o ? await getDb() : null;
+    if (st.o && !db) return done({ gsc_error: "google" });
+    // The workspace's own client (never the environment's when there are accounts).
+    const client = db && st.o ? await clientFor(db, st.o) : accounts ? null : envClient();
+    if (!client) return done({ gsc_error: "not-configured" });
+    const { refreshToken, email } = await exchangeCode(code, req.nextUrl.origin, client);
     const sealed = await sealToken(refreshToken);
-    if (st.o) {
-      const db = await getDb();
-      if (!db) return done({ gsc_error: "google" });
+    if (db && st.o) {
       await saveConnection(db, st.o, sealed, email, st.u);
       return done({ connected: "1" });
     }

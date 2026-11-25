@@ -284,7 +284,7 @@ export default function Settings() {
           )}
         </Section>
 
-        <Section id="search-console" title="Google Search Console" sub="Real Google clicks, impressions and positions for your own site. Connect your Google account (read-only), or have the server use a service account for self-hosting and MCP.">
+        <Section id="search-console" title="Google Search Console" sub="Real Google clicks, impressions and positions for your own site. Each workspace adds its own Google OAuth client, then an admin connects Google once (read-only) for everyone.">
           <GscConnection />
         </Section>
 
