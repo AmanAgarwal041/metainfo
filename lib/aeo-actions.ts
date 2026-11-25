@@ -66,6 +66,12 @@ export interface AeoAction {
   lift: number;
   /** In-scope numbers from the run the action was tracked from. */
   baseline: Snapshot | null;
+  /** Where the suggestion came from: AI answers (a run), the traffic collector, a simulation, Search Console. Older actions: answers. */
+  source?: "answers" | "traffic" | "simulation" | "search-console";
+  /** What it's worth when that isn't a visibility lift, e.g. "+40 clicks / 28 days". */
+  estimate?: string;
+  /** Site-wide AI traffic when it was tracked, to compare once it's done. */
+  traffic?: { at: string; days: number; aiCrawls: number; aiReferrals: number };
 }
 
 export interface RunAnswers {
@@ -141,9 +147,10 @@ export function estimateLift(o: Opportunity, answers: Answer[], you: string): nu
   return Math.round((gaps / done.length) * 1000) / 10;
 }
 
-export function trackAction(o: Opportunity, run: RunAnswers, you: string): AeoAction {
+export function trackAction(o: Opportunity & { source?: AeoAction["source"]; estimate?: string }, run: RunAnswers | null, you: string, traffic?: AeoAction["traffic"]): AeoAction {
   const now = new Date().toISOString();
   const scope = scopeOf(o);
+  const base = run ? snapshot(run.at, run.answers, scope, you) : null;
   return {
     id: actionId(o),
     at: now,
@@ -157,8 +164,11 @@ export function trackAction(o: Opportunity, run: RunAnswers, you: string): AeoAc
     targets: o.targets.slice(0, 12),
     scope,
     status: "todo",
-    lift: estimateLift(o, run.answers, you),
-    baseline: snapshot(run.at, run.answers, scope, you),
+    lift: run ? estimateLift(o, run.answers, you) : 0,
+    baseline: base && base.answered ? base : null,
+    source: o.source ?? "answers",
+    ...(o.estimate ? { estimate: o.estimate } : {}),
+    ...(traffic ? { traffic } : {}),
   };
 }
 

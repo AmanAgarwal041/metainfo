@@ -8,6 +8,7 @@ import { AI_ENGINES } from "@/lib/research-types";
 import { CollatedPrompt, FixPromptButton, PickBox, useFixPicker, type FixPicker } from "../FixPrompt";
 import { Delta, Kpi } from "../kit";
 import { DomainCell, EngineDots } from "./tables";
+import { SOURCE_LABEL, type Suggestion, type SuggestionSource } from "@/lib/aeo-signals";
 
 // Actions: the suggestions from the latest run, turned into tracked work (status, owner, notes), each with an
 // estimated visibility lift and, once done and re-checked, the measured change on the answers it targets.
@@ -35,7 +36,9 @@ function scopeLabel(a: AeoAction): string {
   return "all answers";
 }
 
-function Lift({ value }: { value: number }) {
+function Lift({ value, estimate, source }: { value: number; estimate?: string; source?: string }) {
+  if (!estimate && !value && source && source !== "answers") return null;
+  if (estimate) return <span className="badge gain" title="Estimated from Search Console impressions and position">{estimate}</span>;
   return value > 0 ? (
     <span className="badge gain" title="If you get into every answer it targets that leaves you out today, in points of overall visibility">up to +{value} pts</span>
   ) : (
@@ -109,7 +112,7 @@ function ActionRow({ a, runs, you, ctx, picker, onUpdate }: { a: AeoAction; runs
             </div>
           </div>
           <div className="action-side" onClick={(e) => e.preventDefault()}>
-            <Lift value={a.lift} />
+            <Lift value={a.lift} estimate={a.estimate} source={a.source} />
             <select className="select" value={a.status} aria-label={`Status of “${a.title}”`} onChange={(e) => setStatus(e.currentTarget.value as ActionStatus)}>
               {(Object.keys(ACTION_STATUS) as ActionStatus[]).map((s) => (
                 <option key={s} value={s}>{ACTION_STATUS[s].label}</option>
@@ -145,7 +148,23 @@ function actionDomain(a: AeoAction): string {
 
 /** What's behind an action in the latest run: the prompts it targets with your numbers, and the sources engines cite. */
 function Drivers({ a, latest, you }: { a: AeoAction; latest: RunAnswers | null; you: string }) {
-  if (!latest) return <p className="muted small">Run a check to see what drives this.</p>;
+  if (!latest || (a.source && a.source !== "answers")) {
+    return (
+      <div className="stack" style={{ gap: 14 }}>
+        <p className="small" style={{ margin: 0 }}>{a.why}</p>
+        <p className="muted small" style={{ margin: 0 }}>From: {SOURCE_LABEL[a.source ?? "answers"]}.</p>
+        {a.targets.length > 0 && (
+          <div>
+            <h4 className="drawer-h">Pages it&apos;s about</h4>
+            <ul className="plain-list">
+              {a.targets.map((t, i) => <li key={`${i}:${t.label}`}>{t.url ? <a href={t.url} target="_blank" rel="noreferrer">{t.label}</a> : <span className="small">{t.label}</span>}</li>)}
+            </ul>
+          </div>
+        )}
+        {a.scope.prompts?.length ? <p className="small" style={{ margin: 0 }}><b>{a.source === "search-console" ? "Query" : "Prompt"}:</b> {a.scope.prompts.join(", ")}</p> : null}
+      </div>
+    );
+  }
   const scoped = latest.answers.filter((x) => inScope(x, a.scope));
   const prompts = [...new Set(scoped.map((x) => x.prompt))];
   const urls = a.targets.filter((t) => t.url).slice(0, 10);
@@ -228,7 +247,7 @@ function Drivers({ a, latest, you }: { a: AeoAction; latest: RunAnswers | null; 
   );
 }
 
-function ActionDrawer({ a, latest, runs, you, ctx, onUpdate, onClose, onStep }: { a: AeoAction; latest: RunAnswers | null; runs: RunAnswers[]; you: string; ctx: PromptContext; onUpdate: (id: string, patch: Partial<AeoAction>) => void; onClose: () => void; onStep: (d: -1 | 1) => void }) {
+function ActionDrawer({ a, latest, runs, you, ctx, onUpdate, onClose, onStep, trafficNow }: { a: AeoAction; latest: RunAnswers | null; runs: RunAnswers[]; you: string; ctx: PromptContext; onUpdate: (id: string, patch: Partial<AeoAction>) => void; onClose: () => void; onStep: (d: -1 | 1) => void; trafficNow?: AeoAction["traffic"] }) {
   const [tab, setTab] = useState<"rec" | "drivers" | "impact">("rec");
   const x = actionImpact(a, runs, you);
   return (
@@ -245,7 +264,7 @@ function ActionDrawer({ a, latest, runs, you, ctx, onUpdate, onClose, onStep }: 
       <h3 className="drawer-title">{a.title}</h3>
       <div className="row small muted" style={{ gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
         <span className={`badge prio ${PRIO[a.priority]}`}>{a.priority}</span>
-        <span>{CHANNELS[a.channel].label}</span>·<span>{OPPORTUNITY_KINDS[a.kind]}</span>·<Lift value={a.lift} />
+        <span>{CHANNELS[a.channel].label}</span>·<span>{OPPORTUNITY_KINDS[a.kind]}</span>·<Lift value={a.lift} estimate={a.estimate} source={a.source} />
       </div>
       <div className="tabs" role="tablist" style={{ marginBottom: 12 }}>
         {(
@@ -260,7 +279,17 @@ function ActionDrawer({ a, latest, runs, you, ctx, onUpdate, onClose, onStep }: 
       </div>
       {tab === "rec" && <ActionDetail key={a.id} a={a} ctx={ctx} onUpdate={onUpdate} />}
       {tab === "drivers" && <Drivers a={a} latest={latest} you={you} />}
-      {tab === "impact" &&
+      {tab === "impact" && a.traffic && trafficNow ? (
+        <>
+          <div className="kpi-row" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+            <Kpi label={`AI crawler hits, ${trafficNow.days} days`} value={trafficNow.aiCrawls.toLocaleString()} foot={<>when tracked {a.traffic.aiCrawls.toLocaleString()} <Delta value={trafficNow.aiCrawls - a.traffic.aiCrawls} /></>} />
+            <Kpi label={`AI referrals, ${trafficNow.days} days`} value={trafficNow.aiReferrals.toLocaleString()} foot={<>when tracked {a.traffic.aiReferrals.toLocaleString()} <Delta value={trafficNow.aiReferrals - a.traffic.aiReferrals} /></>} />
+          </div>
+          <p className="muted small">Site-wide numbers from your traffic collector, now against when you tracked this ({fmt(a.traffic.at)}).</p>
+        </>
+      ) : tab === "impact" && a.source && a.source !== "answers" && !runs.length ? (
+        <p className="muted small">{a.source === "search-console" ? "Check the query's clicks and position on the Search Console page after the change has been live for a few weeks." : "Re-run the simulation for this prompt after the change ships: the score shows whether the page caught up."}</p>
+      ) : tab === "impact" &&
         (a.status !== "done" ? (
           <p className="muted small">Mark it done when it ships; the next run measures named, cited and position on the {scopeLabel(a)} it targets.</p>
         ) : x ? (
@@ -284,7 +313,7 @@ function ActionTable({ rows, onOpen, onUpdate, openId }: { rows: AeoAction[]; on
           <tr>
             <th>Title</th>
             <th>Type</th>
-            <th>Channel</th>
+            <th>Source</th>
             <th>Priority</th>
             <th>Status</th>
             <th>Domain</th>
@@ -300,7 +329,7 @@ function ActionTable({ rows, onOpen, onUpdate, openId }: { rows: AeoAction[]; on
                 <button className="link-btn task-title" style={{ textAlign: "left" }} onClick={() => onOpen(a.id)}>{a.title}</button>
               </td>
               <td><span className="badge kind-badge" data-kind={a.kind}>{OPPORTUNITY_KINDS[a.kind]}</span></td>
-              <td className="small">{CHANNELS[a.channel].label}</td>
+              <td className="small">{SOURCE_LABEL[a.source ?? "answers"]}</td>
               <td><span className={`badge prio ${PRIO[a.priority]}`}>{a.priority}</span></td>
               <td>
                 <select className="select" value={a.status} aria-label={`Status of “${a.title}”`} onChange={(e) => onUpdate(a.id, setStatusPatch(e.currentTarget.value as ActionStatus))}>
@@ -308,7 +337,7 @@ function ActionTable({ rows, onOpen, onUpdate, openId }: { rows: AeoAction[]; on
                 </select>
               </td>
               <td className="small ellipsis" style={{ maxWidth: 140 }}>{actionDomain(a) || <span className="muted">N/A</span>}</td>
-              <td className="mono small" style={{ textAlign: "right" }}>{a.lift > 0 ? `+${a.lift}%` : <span className="muted">quality</span>}</td>
+              <td className="mono small" style={{ textAlign: "right" }}>{a.estimate ? a.estimate : a.lift > 0 ? `+${a.lift}%` : <span className="muted">{a.source && a.source !== "answers" ? "–" : "quality"}</span>}</td>
               <td className="small">{a.owner || <span className="muted">Unassigned</span>}</td>
               <td className="small muted" style={{ whiteSpace: "nowrap" }}>{fmt(a.at)}</td>
             </tr>
@@ -330,16 +359,21 @@ export default function Actions({
   ctx,
   onTrack,
   onUpdate,
+  trafficNow,
+  gsc,
 }: {
   actions: AeoAction[];
-  /** Opportunities from the latest run. */
-  suggestions: Opportunity[];
+  /** Suggestions from the latest run, simulations, the traffic collector and Search Console. */
+  suggestions: Suggestion[];
   latest: RunAnswers | null;
   runs: RunAnswers[];
   you: string;
   ctx: PromptContext;
-  onTrack: (os: Opportunity[], status?: ActionStatus) => void;
+  onTrack: (os: Suggestion[], status?: ActionStatus) => void;
   onUpdate: (id: string, patch: Partial<AeoAction>) => void;
+  /** Site-wide AI traffic now, to compare traffic-based actions with when they were tracked. */
+  trafficNow?: AeoAction["traffic"];
+  gsc?: string;
 }) {
   const [cat, setCat] = useState<Category>("all");
   const [layout, setLayout] = useState<"table" | "list">("table");
@@ -352,9 +386,12 @@ export default function Actions({
         ? suggestions
             .filter((o) => !tracked.has(actionId(o)))
             .map((o) => ({ o, lift: estimateLift(o, latest.answers, you) }))
-        : [],
+        : suggestions.filter((o) => !tracked.has(actionId(o))).map((o) => ({ o, lift: 0 })),
     [suggestions, tracked, latest, you],
   );
+  const [src, setSrc] = useState<SuggestionSource | "all">("all");
+  const sources = (Object.keys(SOURCE_LABEL) as SuggestionSource[]).filter((k) => fresh.some((x) => x.o.source === k));
+  const freshShown = fresh.filter((x) => src === "all" || x.o.source === src);
   const isOpen = (a: AeoAction) => a.status === "todo" || a.status === "doing";
   const open = actions.filter(isOpen);
   const done = actions.filter((a) => a.status === "done");
@@ -389,32 +426,44 @@ export default function Actions({
         <Kpi label="Open" value={open.length} foot={`${open.filter((a) => a.status === "doing").length} in progress`} />
         <Kpi label="Done" value={done.length} foot={`${measured.length} measured since`} />
         <Kpi label="Moved the needle" value={measured.length ? `${gains}/${measured.length}` : "–"} foot="done actions with more mentions or citations after" />
-        <Kpi label="New suggestions" value={fresh.length} foot="from the latest run, not tracked yet" />
+        <Kpi label="New suggestions" value={fresh.length} foot="not tracked yet" />
       </div>
 
       {fresh.length > 0 && (
-        <section className="card card-pad">
+        <section className="card card-pad suggestions-card">
           <div className="panel-head">
             <div>
-              <h2 className="section-title">Suggested from the latest run</h2>
-              <p className="section-sub" style={{ marginBottom: 0 }}>Track the ones you&apos;ll work on. Lift is the most overall visibility you could gain: the answers it targets that leave you out today.</p>
+              <h2 className="section-title">{latest ? "Suggested from the latest run" : "Suggestions"}</h2>
+              <p className="section-sub" style={{ marginBottom: 0 }}>
+                Track the ones you&apos;ll work on. From AI answers (lift: the most overall visibility you could gain), agent simulations, your traffic collector and Search Console.
+                {gsc ? ` ${gsc}.` : ""}
+              </p>
             </div>
             <span className="spacer" />
-            <button className="btn btn-sm" onClick={() => onTrack(fresh.filter((x) => x.o.priority === "high").map((x) => x.o))} disabled={!fresh.some((x) => x.o.priority === "high")}>
+            <button className="btn btn-sm" onClick={() => onTrack(freshShown.filter((x) => x.o.priority === "high").map((x) => x.o))} disabled={!freshShown.some((x) => x.o.priority === "high")}>
               Track all high priority
             </button>
-            <button className="btn btn-sm" onClick={() => onTrack(fresh.map((x) => x.o))}>Track all {fresh.length}</button>
+            <button className="btn btn-sm" onClick={() => onTrack(freshShown.map((x) => x.o))}>Track all {freshShown.length}</button>
           </div>
+          {sources.length > 1 && (
+            <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+              <button className="chip" aria-pressed={src === "all"} onClick={() => setSrc("all")}>All {fresh.length}</button>
+              {sources.map((k) => (
+                <button key={k} className="chip" aria-pressed={src === k} onClick={() => setSrc(k)}>{SOURCE_LABEL[k]} {fresh.filter((x) => x.o.source === k).length}</button>
+              ))}
+            </div>
+          )}
           <div className="list-rows" style={{ marginTop: 10 }}>
-            {fresh.map(({ o, lift }) => (
-              <div className="list-row suggestion-row" key={o.id + o.prompts.join("|")}>
+            {freshShown.map(({ o, lift }) => (
+              <div className="list-row suggestion-row" key={actionId(o)}>
                 <span className={`badge prio ${PRIO[o.priority]}`} style={{ alignSelf: "flex-start" }}>{o.priority}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="task-title">{o.title}</div>
                   <div className="task-rec">{o.why}</div>
                 </div>
                 <span className="badge kind-badge" data-kind={o.kind}>{OPPORTUNITY_KINDS[o.kind]}</span>
-                <Lift value={lift} />
+                <Lift value={lift} estimate={o.estimate} source={o.source} />
+                <span className="badge source-badge">{SOURCE_LABEL[o.source]}</span>
                 <button className="btn btn-sm btn-primary" onClick={() => onTrack([o])}>Track</button>
                 <button className="btn btn-sm" title="Hide this suggestion; it stays under Archived" onClick={() => onTrack([o], "dismissed")}>Dismiss</button>
               </div>
@@ -461,7 +510,7 @@ export default function Actions({
             )}
           </div>
         </section>
-        {current && <ActionDrawer key={current.id} a={current} latest={latest} runs={runs} you={you} ctx={ctx} onUpdate={onUpdate} onClose={() => setOpenId(null)} onStep={step} />}
+        {current && <ActionDrawer key={current.id} a={current} latest={latest} runs={runs} you={you} ctx={ctx} onUpdate={onUpdate} onClose={() => setOpenId(null)} onStep={step} trafficNow={trafficNow} />}
       </div>
     </div>
   );

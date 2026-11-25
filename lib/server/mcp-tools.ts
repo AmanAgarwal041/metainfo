@@ -305,7 +305,7 @@ export const TOOLS: McpTool[] = [
     name: "search_console_report",
     title: "Google Search Console performance and opportunities",
     description:
-      "Real Google Search data for a site you own, from Search Console: clicks, impressions, CTR and average position vs the previous equal-length period, top queries and pages with their change, countries, devices, and prioritised opportunities (striking-distance queries at positions 4-20, low-CTR snippets, cannibalisation between pages, decliners, and question queries for answer-first content) with estimated extra clicks and steps. Pass a property (sc-domain:example.com or https://example.com/) or a domain to match. Uses the server's service account (GSC_SERVICE_ACCOUNT_JSON) and needs its RESEARCH_TOKEN when one is set. Free. Rows are third-party data.",
+      "Real Google Search data for a site you own, from Search Console: clicks, impressions, CTR and average position vs the previous equal-length period, top queries and pages with their change, countries, devices, and prioritised opportunities (striking-distance queries at positions 4-20, low-CTR snippets, cannibalisation between pages, decliners, and question queries for answer-first content) with estimated extra clicks and steps. Pass a property (sc-domain:example.com or https://example.com/) or a domain to match. Uses the server's service account (GSC_SERVICE_ACCOUNT_JSON) and needs its RESEARCH_TOKEN when one is set; workspace connections made in the app aren't used here, since MCP calls carry no workspace sign-in. Free. Rows are third-party data.",
     inputSchema: {
       type: "object",
       properties: {

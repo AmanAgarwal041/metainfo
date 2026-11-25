@@ -23,12 +23,15 @@ export default function Simulator({
   observations,
   llm,
   initial,
+  onResult,
 }: {
   project: Project;
   brand: string;
   observations: Observation[];
   llm: boolean;
   initial: { prompt: string; engine?: AiEngine; nonce: number } | null;
+  /** Called with each finished simulation, so it can be saved and feed the dashboard and recommendations. */
+  onResult?: (s: Simulation) => void;
 }) {
   const [prompt, setPrompt] = useState(project.prompts[0] ?? "");
   const [engine, setEngine] = useState<AiEngine>("chatgpt");
@@ -47,8 +50,7 @@ export default function Simulator({
     setSim(null);
     try {
       const o = observations.find((x) => x.prompt === p && x.engine === e && x.answered);
-      setSim(
-        await postResearch<Simulation>("/api/aeo/simulate", {
+      const result = await postResearch<Simulation>("/api/aeo/simulate", {
           prompt: p,
           engine: e,
           domain: project.domain,
@@ -57,8 +59,9 @@ export default function Simulator({
           cited: o?.sources.map((s) => s.url) ?? [],
           yourUrl: yourUrl.trim() || undefined,
           explain: llm && explain,
-        }),
-      );
+        });
+      setSim(result);
+      onResult?.(result);
     } catch (err) {
       setError(err);
     } finally {

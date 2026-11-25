@@ -1,16 +1,19 @@
 // Google Search Console: real Google clicks, impressions, CTR and positions for
 // a site you own, plus URL inspection and sitemaps.
 //
-// Two ways to authenticate, both on fetch and Web Crypto only (Workers runtime):
-//  1. OAuth (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET) for the UI. The refresh
-//     token lives in an HttpOnly cookie, AES-GCM encrypted with a key derived
-//     from GSC_COOKIE_SECRET (or the client secret). It never reaches client JS.
+// Authentication (resolved in gsc-auth.ts), all on fetch and Web Crypto (Workers runtime):
+//  1. A workspace connection: an admin connects Google once for the whole
+//     organisation; the refresh token is stored in D1, AES-GCM sealed with a
+//     key derived from GSC_COOKIE_SECRET (or the OAuth client secret). It never
+//     leaves the server.
 //  2. A service account (GSC_SERVICE_ACCOUNT_JSON) for self-hosting and MCP:
 //     add its client_email as a user on the Search Console property. Because it
 //     exposes the server owner's data, it's only used for callers that present
 //     RESEARCH_TOKEN when one is set.
-// The cookie wins when present. Access tokens are cached in memory until
-// shortly before they expire.
+//  3. Servers without accounts (no D1 or no Clerk): the sealed refresh token
+//     lives in an HttpOnly cookie in the browser instead.
+// Access tokens are cached in memory per connection until shortly before
+// they expire.
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { GscSite, Row } from "../gsc-analysis";
@@ -19,6 +22,8 @@ import type { GscSite, Row } from "../gsc-analysis";
 export * from "../gsc-analysis";
 
 export const SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
+/** OAuth asks for these too, so the id_token names the Google account that was connected. */
+const OAUTH_SCOPES = `openid email ${SCOPE}`;
 export const SESSION_COOKIE = "gsc_session";
 export const STATE_COOKIE = "gsc_state";
 /** The session cookie is only sent to these routes. */
@@ -137,15 +142,15 @@ function remember(key: string, token: string, expiresIn: number) {
   tokenCache.set(key, { token, exp: Date.now() + Math.max(60, expiresIn) * 1000 });
 }
 
-async function tokenRequest(body: Record<string, string>): Promise<{ access_token: string; expires_in: number; refresh_token?: string }> {
+async function tokenRequest(body: Record<string, string>): Promise<{ access_token: string; expires_in: number; refresh_token?: string; id_token?: string }> {
   const res = await fetch(TOKEN_URL, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(body) });
-  const data = (await res.json().catch(() => ({}))) as { access_token?: string; expires_in?: number; refresh_token?: string; error?: string; error_description?: string };
+  const data = (await res.json().catch(() => ({}))) as { access_token?: string; expires_in?: number; refresh_token?: string; id_token?: string; error?: string; error_description?: string };
   if (!res.ok || !data.access_token) {
     if (data.error === "invalid_grant") throw new GscError("Your Google connection expired or was revoked. Connect Search Console again.", 401, "not-connected");
     if (data.error === "invalid_client" || data.error === "unauthorized_client") throw new GscError("Google rejected this server's OAuth client or service account. Check GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET or GSC_SERVICE_ACCOUNT_JSON.", 502, "config");
     throw new GscError(`Google token request failed (${data.error ?? `HTTP ${res.status}`}).`, 502, "google");
   }
-  return { access_token: data.access_token, expires_in: data.expires_in ?? 3600, refresh_token: data.refresh_token };
+  return { access_token: data.access_token, expires_in: data.expires_in ?? 3600, refresh_token: data.refresh_token, id_token: data.id_token };
 }
 
 // ---------------------------------------------------------------- OAuth
@@ -164,7 +169,7 @@ export function authUrl(origin: string, state: string): string {
     client_id: process.env.GOOGLE_CLIENT_ID ?? "",
     redirect_uri: redirectUri(origin),
     response_type: "code",
-    scope: SCOPE,
+    scope: OAUTH_SCOPES,
     access_type: "offline",
     prompt: "consent",
     include_granted_scopes: "true",
@@ -173,8 +178,26 @@ export function authUrl(origin: string, state: string): string {
   return `${AUTH_URL}?${q}`;
 }
 
-/** Exchange the authorization code; returns the refresh token (and primes the access-token cache). */
-export async function exchangeCode(code: string, origin: string): Promise<string> {
+/**
+ * The email claim of an id_token received directly from Google's token
+ * endpoint over TLS (OpenID Connect allows skipping signature checks then).
+ */
+export function idTokenEmail(idToken: string | undefined): string | null {
+  const payload = idToken?.split(".")[1];
+  if (!payload) return null;
+  try {
+    const claims = JSON.parse(dec.decode(fromB64url(payload))) as { email?: unknown; email_verified?: unknown };
+    return typeof claims.email === "string" && claims.email_verified !== false ? claims.email.slice(0, 320) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Cache key for one OAuth connection: a hash, so the refresh token itself isn't kept as a key. */
+export const connectionKey = async (refreshToken: string) => `rt:${await sha256Hex(refreshToken)}`;
+
+/** Exchange the authorization code; returns the refresh token and the Google account (and primes the access-token cache). */
+export async function exchangeCode(code: string, origin: string): Promise<{ refreshToken: string; email: string | null }> {
   const t = await tokenRequest({
     code,
     client_id: process.env.GOOGLE_CLIENT_ID ?? "",
@@ -183,37 +206,48 @@ export async function exchangeCode(code: string, origin: string): Promise<string
     grant_type: "authorization_code",
   });
   if (!t.refresh_token) throw new GscError("Google didn't return a refresh token. Remove MetaInfo from your Google account's third-party access and connect again.", 502, "google");
-  remember(`rt:${await sha256Hex(t.refresh_token)}`, t.access_token, t.expires_in);
-  return t.refresh_token;
+  remember(await connectionKey(t.refresh_token), t.access_token, t.expires_in);
+  return { refreshToken: t.refresh_token, email: idTokenEmail(t.id_token) };
 }
 
-async function oauthAccessToken(refreshToken: string): Promise<string> {
-  const key = `rt:${await sha256Hex(refreshToken)}`;
+/** An access token for a stored refresh token, cached per connection. Throws GscError "not-connected" on a revoked/expired grant. */
+export async function oauthAccessToken(refreshToken: string): Promise<string> {
+  const key = await connectionKey(refreshToken);
   const hit = cached(key);
   if (hit) return hit;
-  const t = await tokenRequest({
-    client_id: process.env.GOOGLE_CLIENT_ID ?? "",
-    client_secret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-    refresh_token: refreshToken,
-    grant_type: "refresh_token",
-  });
-  remember(key, t.access_token, t.expires_in);
-  return t.access_token;
+  try {
+    const t = await tokenRequest({
+      client_id: process.env.GOOGLE_CLIENT_ID ?? "",
+      client_secret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    });
+    remember(key, t.access_token, t.expires_in);
+    return t.access_token;
+  } catch (e) {
+    tokenCache.delete(key);
+    throw e;
+  }
+}
+
+/** Forget a connection's cached access token (disconnect, invalid grant). */
+export async function forgetConnection(refreshToken: string): Promise<void> {
+  tokenCache.delete(await connectionKey(refreshToken));
 }
 
 /** Best effort: revoke at Google and forget the cached access token. */
 export async function revoke(refreshToken: string): Promise<void> {
-  tokenCache.delete(`rt:${await sha256Hex(refreshToken)}`);
+  await forgetConnection(refreshToken);
   try {
     await fetch(REVOKE_URL, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: refreshToken }), signal: AbortSignal.timeout(5000) });
   } catch {
-    /* the cookie is cleared either way */
+    /* the stored token is deleted either way */
   }
 }
 
 // ---------------------------------------------------------------- service account
 
-interface ServiceAccount {
+export interface ServiceAccount {
   client_email: string;
   private_key: string;
   token_uri?: string;
@@ -255,7 +289,7 @@ export async function signJwt(payload: Record<string, unknown>, privateKeyPem: s
   return `${head}.${body}.${b64url(sig)}`;
 }
 
-async function serviceAccountToken(sa: ServiceAccount): Promise<string> {
+export async function serviceAccountToken(sa: ServiceAccount): Promise<string> {
   const key = `sa:${sa.client_email}`;
   const hit = cached(key);
   if (hit) return hit;
@@ -292,52 +326,14 @@ export function withGscOwner<T>(headers: Headers, fn: () => Promise<T>): Promise
   return ownerStore.run(isOwnerRequest(headers), fn);
 }
 
-// ---------------------------------------------------------------- resolving auth
+// ---------------------------------------------------------------- auth handle
 
 export interface GscAuth {
   token: string;
-  via: "oauth" | "service-account";
-  /** Service-account email, for access errors. */
+  /** org: the workspace's connection; browser: the cookie (servers without accounts); service-account. */
+  via: "org" | "browser" | "service-account";
+  /** Service-account or connected Google account email, for access errors. */
   email?: string;
-}
-
-export interface GscStatus {
-  oauthConfigured: boolean;
-  /** The service account's email when one is configured (and usable by this caller). */
-  serviceAccount: string | null;
-  /** RESEARCH_TOKEN is set and this caller didn't present it, so the service account is hidden. */
-  serviceAccountLocked: boolean;
-  /** This browser has a Search Console OAuth connection. */
-  connected: boolean;
-  /** What a report would use right now. */
-  via: "oauth" | "service-account" | null;
-}
-
-export async function status(sessionCookie: string | undefined, headers: Headers): Promise<GscStatus> {
-  const connected = oauthConfigured() && (await openToken(sessionCookie)) !== null;
-  const sa = serviceAccount();
-  const owner = isOwnerRequest(headers);
-  const serviceAccountEmail = sa && owner ? sa.client_email : null;
-  return {
-    oauthConfigured: oauthConfigured(),
-    serviceAccount: serviceAccountEmail,
-    serviceAccountLocked: Boolean(sa && !owner),
-    connected,
-    via: connected ? "oauth" : serviceAccountEmail ? "service-account" : null,
-  };
-}
-
-/** OAuth cookie first, then the service account (if this caller may use it). */
-export async function getAccessToken(sessionCookie: string | undefined, headers: Headers): Promise<GscAuth> {
-  if (oauthConfigured()) {
-    const rt = await openToken(sessionCookie);
-    if (rt) return { token: await oauthAccessToken(rt), via: "oauth" };
-  }
-  const sa = serviceAccount();
-  if (sa && isOwnerRequest(headers)) return { token: await serviceAccountToken(sa), via: "service-account", email: sa.client_email };
-  if (sa) throw new GscError("This server's Search Console service account needs its access token (RESEARCH_TOKEN), or connect your own Google account.", 401, "token");
-  if (oauthConfigured()) throw new GscError("Connect Google Search Console to see your data.", 401, "not-connected");
-  throw new GscError("Search Console isn't configured on this server. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET (OAuth) or GSC_SERVICE_ACCOUNT_JSON.", 501, "not-configured");
 }
 
 /** For MCP: the service account only, for callers allowed to use it (see withGscOwner). */
@@ -362,7 +358,7 @@ async function gapi<T>(auth: GscAuth, url: string, init: RequestInit = {}, prope
   const body = (await res.json().catch(() => null)) as { error?: { message?: string; status?: string } } | null;
   const detail = String(body?.error?.message ?? "").slice(0, 300);
   if (res.status === 401) {
-    throw new GscError(auth.via === "oauth" ? "Your Google session expired. Connect Search Console again." : "Google rejected the service account's token.", 401, "not-connected");
+    throw new GscError(auth.via === "service-account" ? "Google rejected the service account's token." : "Google rejected the Search Console connection. Connect Search Console again.", 401, "not-connected");
   }
   if (res.status === 403) {
     const what = property ? `"${property}"` : "this property";
@@ -372,7 +368,7 @@ async function gapi<T>(auth: GscAuth, url: string, init: RequestInit = {}, prope
     throw new GscError(
       auth.via === "service-account"
         ? `The service account ${auth.email} has no access to ${what}. Add it as a user on the property in Search Console (Settings > Users and permissions).`
-        : `This Google account has no access to ${what}. Pick a property you own, or connect a Google account that has access.`,
+        : `The connected Google account${auth.email ? ` (${auth.email})` : ""} has no access to ${what}. Pick a property it can read, or connect a Google account that has access.`,
       403,
       "forbidden",
     );

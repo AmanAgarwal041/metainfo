@@ -142,3 +142,43 @@ export async function buildReport(auth: GscAuth, p: ReportParams, now = new Date
     unavailable,
   };
 }
+
+export interface GscOpportunitiesResult {
+  site: string;
+  days: number;
+  range: Period;
+  previousRange: Period | null;
+  totals: Totals;
+  previous: Totals | null;
+  change: Change | null;
+  opportunities: GscOpportunity[];
+}
+
+/** Just the opportunities (and totals) for web search: the queries a report needs for them, nothing else. */
+export async function buildOpportunities(auth: GscAuth, site: string, days: ReportParams["days"], now = new Date()): Promise<GscOpportunitiesResult> {
+  const { current, previous } = periods(days, now);
+  const run = (period: Period, dimensions: Dimension[], rowLimit: number) => query(auth, site, { ...period, dimensions, rowLimit, type: "web" });
+  const none = Promise.resolve(null);
+  const [cur, prev, q, qPrev, pg, pgPrev, qp] = await Promise.all([
+    run(current, [], 1),
+    previous ? run(previous, [], 1) : none,
+    run(current, ["query"], 1000),
+    previous ? run(previous, ["query"], 1000) : none,
+    run(current, ["page"], 500),
+    previous ? run(previous, ["page"], 500) : none,
+    run(current, ["query", "page"], 5000),
+  ]);
+  const totals = toTotals(cur[0]);
+  const prevTotals = prev ? toTotals(prev[0]) : null;
+  const minImpressions = Math.max(10, Math.round(days * 0.75), Math.round(totals.impressions * 0.0005));
+  return {
+    site,
+    days,
+    range: current,
+    previousRange: previous,
+    totals,
+    previous: prevTotals,
+    change: compareTotals(totals, prevTotals),
+    opportunities: opportunities({ queries: joinPrevious(q, previous ? (qPrev ?? []) : null), pages: joinPrevious(pg, previous ? (pgPrev ?? []) : null), queryPages: qp, minImpressions }),
+  };
+}

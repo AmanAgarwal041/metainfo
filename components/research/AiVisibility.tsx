@@ -18,12 +18,19 @@ import Dashboard from "../aeo/Dashboard";
 import CitationsView from "../aeo/CitationsView";
 import Actions from "../aeo/Actions";
 import Impact from "../aeo/Impact";
+import SignalsDashboard from "../aeo/SignalsDashboard";
+import { fromGsc, fromInsight, fromSimulation, loadSims, saveSim, type SavedSimulation, type Suggestion } from "@/lib/aeo-signals";
+import { gscNote, useGscOpportunities } from "@/lib/aeo-gsc";
+import { useTraffic } from "@/lib/traffic-client";
+import { AI_KINDS } from "@/lib/traffic";
+import { trafficInsights } from "@/lib/traffic-insights";
 import { brandResults, brandsOf, SentimentBadge } from "../aeo/shared";
 import PromptReport from "../aeo/PromptReport";
 import Simulator from "../aeo/Simulator";
 import { scoreColor } from "../ui";
 import { ErrorBox, ProviderNotice, useResearchStatus } from "./common";
 
+const TRAFFIC_DAYS = 30;
 const fmt = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -95,11 +102,15 @@ export default function AiVisibility() {
   const [simulate, setSimulate] = useState<{ prompt: string; engine?: AiEngine; nonce: number } | null>(null);
   const [report, setReport] = useState<{ prompt: string; nonce: number } | null>(null);
   const [actions, setActions] = useState<AeoAction[]>([]);
+  const [sims, setSims] = useState<SavedSimulation[]>([]);
+  const traffic = useTraffic(project.id || null, TRAFFIC_DAYS);
+  const gsc = useGscOpportunities(project.id);
 
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect -- browser-stored runs and audits for the active project */
     setRuns(project.id ? loadRuns(project.id) : []);
     setActions(project.id ? loadActions(project.id) : []);
+    setSims(project.id ? loadSims(project.id) : []);
     setSite(siteForDomain(loadSites(), project.domain));
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [project.id, project.domain]);
@@ -112,13 +123,23 @@ export default function AiVisibility() {
   const prev = runs.at(-2);
   const previous = useMemo<Answer[]>(() => (prev?.observations ?? []).map((o) => ({ ...o, brands: brandResults(o, brands) })), [prev, brands]);
   const history = useMemo<RunAnswers[]>(() => runs.map((r) => ({ at: r.at, answers: r.observations.map((o) => ({ ...o, brands: brandResults(o, brands) })) })), [runs, brands]);
-  const suggestions = useMemo(() => opportunities(answerList, brands, brand), [answerList, brands, brand]);
+  const statusKnown = traffic.state === "ready" && (traffic.stats.agents.length ? traffic.stats.agents.some((a) => a.unknownStatus < a.hits) : traffic.site.lastVia !== "next");
+  const suggestions = useMemo<Suggestion[]>(() => {
+    const order = { high: 0, medium: 1, low: 2 };
+    return [
+      ...opportunities(answerList, brands, brand).map((o) => ({ ...o, source: "answers" as const })),
+      ...sims.map(fromSimulation).filter((x): x is Suggestion => !!x),
+      ...(traffic.state === "ready" ? trafficInsights(traffic.stats, traffic.site.domain, statusKnown).map((i) => fromInsight(i, traffic.site.domain)).filter((x): x is Suggestion => !!x) : []),
+      ...(gsc?.connected ? gsc.opportunities.slice(0, 15).map((o) => fromGsc(o, gsc.days)) : []),
+    ].sort((a, b) => order[a.priority] - order[b.priority]);
+  }, [answerList, brands, brand, sims, traffic, statusKnown, gsc]);
+  const trafficNow = traffic.state === "ready" ? { at: new Date().toISOString(), days: TRAFFIC_DAYS, aiCrawls: AI_KINDS.reduce((n, k) => n + (traffic.stats.totals[k] ?? 0), 0), aiReferrals: traffic.stats.daily.reduce((n, d) => n + d.aiReferrals, 0) } : undefined;
   const ctx = useMemo<PromptContext>(() => ({ site: project.domain ? `https://${project.domain}` : brand, source: `AI visibility run (brand: ${brand})` }), [project.domain, brand]);
-  const track = (os: Opportunity[], status: ActionStatus = "todo") => {
-    const latest = history.at(-1);
-    if (!latest || !project.id) return;
+  const track = (os: (Opportunity | Suggestion)[], status: ActionStatus = "todo") => {
+    const latest = history.at(-1) ?? null;
+    if (!project.id) return;
     const have = new Set(actions.map((a) => a.id));
-    const added = os.map((o) => ({ ...trackAction(o, latest, project.domain), status })).filter((a) => !have.has(a.id));
+    const added = os.map((o) => ({ ...trackAction(o, latest, project.domain, "source" in o && o.source === "traffic" ? trafficNow : undefined), status })).filter((a) => !have.has(a.id));
     setActions(saveActions(project.id, [...actions, ...added]));
   };
   const updateAction = (id: string, patch: Partial<AeoAction>) => {
@@ -297,7 +318,13 @@ export default function AiVisibility() {
 
           </>
         ) : active === "simulate" ? (
-          <Simulator project={project} brand={brand} observations={observations} llm={llm} initial={simulate} />
+          <Simulator project={project} brand={brand} observations={observations} llm={llm} initial={simulate} onResult={(x) => setSims(saveSim(project.id, x))} />
+        ) : !last && active === "overview" ? (
+          <SignalsDashboard traffic={traffic} days={TRAFFIC_DAYS} domain={project.domain} brand={brand} prompts={project.prompts} sims={sims} answersTracked={false} onSimulate={openSim} />
+        ) : !last && active === "actions" ? (
+          <Actions actions={actions} suggestions={suggestions} latest={null} runs={history} you={project.domain} ctx={ctx} onTrack={track} onUpdate={updateAction} trafficNow={trafficNow} gsc={gscNote(gsc)} />
+        ) : !last && active === "impact" ? (
+          <Impact runs={history} brands={brands} actions={actions} projectId={project.id} domain={project.domain} />
         ) : !last ? (
           <div className="card">
             <EmptyState
@@ -305,7 +332,7 @@ export default function AiVisibility() {
               body={
                 status?.dataforseo
                   ? "Run a check to see which engines name and cite you, in what position and tone, and who they recommend instead. Or simulate agents on a prompt for free."
-                  : "Answer monitoring needs DataForSEO. Meanwhile, Simulate agents scores your pages against any prompt for free."
+                  : "This view compares what AI answers say, which needs DataForSEO. The Dashboard, Recommendations and Impact tabs work from your traffic collector, Search Console and agent simulations."
               }
               action={status?.dataforseo && project.prompts.length ? { label: "Run check", onClick: () => setConfirm(true) } : { label: "Simulate agents", onClick: () => setTab("simulate") }}
             />
@@ -316,7 +343,12 @@ export default function AiVisibility() {
               Last run {fmt(last.at)}: {last.observations.length} answers, ${last.cost.toFixed(3)}.
               {observations.some((o) => o.brands?.some((b) => b.judgedBy === "llm")) ? " Sentiment judged by Claude." : " Sentiment from word lists."}
             </p>
-            {active === "overview" && <Dashboard runs={history} brands={brands} brand={brand} />}
+            {active === "overview" && (
+              <>
+                <Dashboard runs={history} brands={brands} brand={brand} />
+                <SignalsDashboard traffic={traffic} days={TRAFFIC_DAYS} domain={project.domain} brand={brand} prompts={project.prompts} sims={sims} answersTracked onSimulate={openSim} />
+              </>
+            )}
             {active === "prompts" && (
               <section className="card card-pad">
                 <PromptTable observations={observations} previous={previous} brand={brand} brands={brands} onOpen={setViewing} onReport={openReport} />
@@ -328,7 +360,7 @@ export default function AiVisibility() {
               </section>
             )}
             {active === "citations" && <CitationsView runs={history} brands={brands} />}
-            {active === "actions" && <Actions actions={actions} suggestions={suggestions} latest={history.at(-1) ?? null} runs={history} you={project.domain} ctx={ctx} onTrack={track} onUpdate={updateAction} />}
+            {active === "actions" && <Actions actions={actions} suggestions={suggestions} latest={history.at(-1) ?? null} runs={history} you={project.domain} ctx={ctx} onTrack={track} onUpdate={updateAction} trafficNow={trafficNow} gsc={gscNote(gsc)} />}
             {active === "impact" && <Impact runs={history} brands={brands} actions={actions} projectId={project.id} domain={project.domain} />}
 
             {viewing && active === "prompts" && (

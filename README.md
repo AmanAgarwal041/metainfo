@@ -192,23 +192,30 @@ steps: striking-distance queries (positions 4 to 20), top-5 queries with a low c
 content for AI Overviews. Then top queries and pages (searchable, CSV export), countries, devices, search appearance and a
 **URL inspection** box (index status, coverage, last crawl, your canonical vs Google's, mobile usability, rich results).
 
-There are two ways to authenticate, and both can be set:
+Like DataForSEO, Search Console belongs to the **workspace**, not the browser. Access is resolved in this order:
 
-* **OAuth (each visitor connects their own Google account).** In Google Cloud, enable the *Google Search Console API*, create an
-  OAuth client of type *Web application*, and add `https://your-host/api/gsc/callback` (and `http://localhost:3000/api/gsc/callback`
-  for development) as an authorised redirect URI. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. The app asks for the read-only
-  `webmasters.readonly` scope with offline access. The refresh token is kept in an HttpOnly, SameSite=Lax cookie (Secure except on
-  localhost, sent only to `/api/gsc/*`), AES-GCM encrypted with a key derived from `GSC_COOKIE_SECRET` (falls back to the client
-  secret; set it so rotating the client secret doesn't sign everyone out). It never reaches browser JavaScript. Disconnecting
-  clears the cookie and revokes the grant. `GSC_REDIRECT_URI` overrides the redirect URI when the app sits behind a proxy that
-  changes the origin.
-* **Service account (self-hosting and MCP).** Create a service account and a JSON key in Google Cloud (same project, API enabled),
-  put the key file's JSON (or the same, base64-encoded) in `GSC_SERVICE_ACCOUNT_JSON`, and in Search Console open
-  *Settings > Users and permissions* and add the service account's `client_email` as a user (Restricted is enough). Because it
-  reads the server owner's data, the service account is only used for callers that present `RESEARCH_TOKEN` when that's set
-  (own DataForSEO keys don't count): **set `RESEARCH_TOKEN` on any public deployment that has a service account.**
+1. **The workspace's connection (OAuth).** An admin of the workspace (personal workspaces: the owner) clicks *Connect* once;
+   every member then reads the same real data, and the property picked for a project is saved for the whole team. In Google
+   Cloud, enable the *Google Search Console API*, create an OAuth client of type *Web application*, add
+   `https://your-host/api/gsc/callback` (and `http://localhost:3000/api/gsc/callback` for development) as an authorised redirect
+   URI, and set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. The app asks for `webmasters.readonly` plus `openid email` (to
+   show which Google account is connected), with offline access. The refresh token is stored in D1 (`gsc_connections`,
+   migration `0004_search_console.sql`), AES-GCM sealed with a key derived from `GSC_COOKIE_SECRET` (falls back to the client
+   secret; set it so rotating the client secret doesn't break connections), and never leaves the server. Because Google's
+   redirect back is a plain browser navigation, `/api/gsc/connect` is called from the app with the Clerk session, checks the
+   admin role, and binds the workspace into a sealed, 10-minute state cookie that the callback verifies. If Google revokes the
+   grant, the connection is marked and admins are asked to reconnect. `GSC_REDIRECT_URI` overrides the redirect URI behind a
+   proxy that changes the origin.
+2. **Service account (self-hosting and MCP).** Create a service account and a JSON key in Google Cloud (same project, API enabled),
+   put the key file's JSON (or the same, base64-encoded) in `GSC_SERVICE_ACCOUNT_JSON`, and in Search Console open
+   *Settings > Users and permissions* and add the service account's `client_email` as a user (Restricted is enough). Because it
+   reads the server owner's data, it's only used for callers that present `RESEARCH_TOKEN` when that's set (own DataForSEO keys
+   don't count): **set `RESEARCH_TOKEN` on any public deployment that has a service account.** MCP calls carry no workspace
+   sign-in, so the MCP tools use the service account only.
+3. **Servers without accounts** (no D1 binding or no Clerk keys): the sealed refresh token is kept in an HttpOnly, SameSite=Lax
+   cookie in the browser instead (Secure except on localhost, sent only to `/api/gsc/*`). A signed-in request never uses it.
 
-A connected Google account wins over the service account. Access tokens are cached in memory until shortly before they expire.
+Access tokens are cached in memory per connection until shortly before they expire, and dropped on disconnect or a revoked grant.
 Everything uses `fetch` and Web Crypto (the service-account JWT is signed with RS256 in Web Crypto), so it runs on Workers.
 
 ```bash
@@ -216,11 +223,19 @@ npx wrangler secret put GOOGLE_CLIENT_ID
 npx wrangler secret put GOOGLE_CLIENT_SECRET
 npx wrangler secret put GSC_COOKIE_SECRET          # any long random string
 npx wrangler secret put GSC_SERVICE_ACCOUNT_JSON   # optional, for MCP / self-hosting
+npx wrangler d1 migrations apply metainfo --remote   # creates gsc_connections and gsc_properties
 ```
 
-API: `GET /api/gsc/status`, `GET /api/gsc/sites`, `POST /api/gsc/report {site, days, country?, device?, search_type?}`,
-`POST /api/gsc/inspect {site, url}`. With a service account, MCP clients get `search_console_report` and
-`search_console_inspect_url`.
+API (send the Clerk session as `Authorization: Bearer`, like the other workspace routes):
+
+* `GET /api/gsc/status?projectId=` → `mode` (`org` | `service-account` | `browser` | `none`), `connected`, `account`, `connectedBy`,
+  `lastError`, `canManage`, `signedIn`, `accounts`, `serviceAccount`, `property` (the project's saved property). Never calls Google.
+* `POST /api/gsc/connect {return?}` → `{url}` (admins), `POST /api/gsc/disconnect` (admins), `PUT /api/gsc/property {projectId, site}` (members).
+* `GET /api/gsc/sites`, `POST /api/gsc/report {site, days, country?, device?, search_type?}`, `POST /api/gsc/inspect {site, url}`.
+* `GET /api/gsc/opportunities?projectId=&days=28` → `{connected: true, site, totals, previous, change, range, opportunities}`, or
+  `{connected: false, reason, message}` when Search Console isn't available (not an error). Cached for 10 minutes.
+
+With a service account, MCP clients get `search_console_report` and `search_console_inspect_url`.
 
 ## MCP server
 

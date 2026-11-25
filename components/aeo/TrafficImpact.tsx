@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { AI_KINDS, agentMeta, KIND_META, sourceMeta } from "@/lib/traffic";
+import { AI_KINDS, agentMeta, KIND_META, sourceMeta, type TrafficStats } from "@/lib/traffic";
 import { useTraffic } from "@/lib/traffic-client";
 import { HBars, LineChart } from "../charts";
 import { Delta, Kpi } from "../kit";
@@ -39,14 +39,6 @@ export default function TrafficImpact({ projectId, domain }: { projectId: string
     );
   }
 
-  const { stats } = view;
-  const x = stats.daily.map((d) => dayLabel(d.day));
-  const aiSources = stats.sources.filter((s) => sourceMeta(s.source).ai);
-  const referrals = stats.daily.reduce((n, d) => n + d.aiReferrals, 0);
-  const crawls = AI_KINDS.reduce((n, k) => n + (stats.totals[k] ?? 0), 0);
-  const crawlsBefore = AI_KINDS.reduce((n, k) => n + (stats.previous.totals[k] ?? 0), 0);
-  const people = stats.totals.human ?? 0;
-
   return (
     <div className="stack" style={{ gap: 16 }}>
       <div className="row" style={{ gap: 10 }}>
@@ -58,6 +50,22 @@ export default function TrafficImpact({ projectId, domain }: { projectId: string
         <span className="spacer" />
         <Link className="small" href="/traffic">Open Traffic</Link>
       </div>
+      <TrafficPanels stats={view.stats} domain={domain} days={days} />
+    </div>
+  );
+}
+
+/** AI referral and crawler KPIs, charts and page tables for one period of traffic stats. */
+export function TrafficPanels({ stats, domain, days }: { stats: TrafficStats; domain: string; days: number }) {
+  const x = stats.daily.map((d) => dayLabel(d.day));
+  const aiSources = stats.sources.filter((s) => sourceMeta(s.source).ai);
+  const referrals = stats.daily.reduce((n, d) => n + d.aiReferrals, 0);
+  const crawls = AI_KINDS.reduce((n, k) => n + (stats.totals[k] ?? 0), 0);
+  const crawlsBefore = AI_KINDS.reduce((n, k) => n + (stats.previous.totals[k] ?? 0), 0);
+  const people = stats.totals.human ?? 0;
+
+  return (
+    <div className="stack" style={{ gap: 16 }}>
       <div className="kpi-row">
         <Kpi label="AI referrals" value={referrals} foot={<>vs previous {days} days <Delta value={referrals - stats.previous.aiReferrals} /></>} />
         <Kpi label="Share of visits from AI" value={people ? `${Math.round((referrals / people) * 1000) / 10}%` : "–"} foot={`of ${people} visits by people`} />

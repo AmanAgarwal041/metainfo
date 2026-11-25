@@ -2,13 +2,17 @@
 
 // Google Search Console: your real Google clicks, impressions, CTR and
 // positions, compared with the previous period, plus opportunities and URL
-// inspection. Auth is an OAuth connection (encrypted HttpOnly cookie) or the
-// server's service account; see lib/server/gsc.ts.
+// inspection. Search Console is connected once per workspace by an admin
+// (stored server-side), or read with the server's service account; servers
+// without accounts fall back to a per-browser cookie. See lib/server/gsc-auth.ts.
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { matchSite, OPPORTUNITY_LABELS, type GscOpportunity, type GscSite, type KeyRow, type OpportunityKind } from "@/lib/gsc-analysis";
-import type { GscStatus, Inspection } from "@/lib/server/gsc";
+import { getToken as clerkToken } from "@clerk/nextjs";
+import { useAccount } from "@/lib/account";
+import type { Inspection } from "@/lib/server/gsc";
+import type { GscStatus } from "@/lib/server/gsc-auth";
 import type { GscReport } from "@/lib/server/gsc-report";
 import { useProject } from "@/lib/project";
 import { fmtNum, getToken, ResearchError, toCsv } from "@/lib/research-client";
@@ -25,10 +29,16 @@ class GscClientError extends Error {
   }
 }
 
-async function gsc<T>(path: string, body?: unknown): Promise<T> {
+async function gsc<T>(path: string, body?: unknown, method?: string): Promise<T> {
+  // The workspace's connection is found from the Clerk session; the research token unlocks the server's service account.
+  const session = await clerkToken().catch(() => null);
   const res = await fetch(`/api/gsc/${path}`, {
-    method: body === undefined ? "GET" : "POST",
-    headers: { "x-research-token": getToken(), ...(body === undefined ? {} : { "content-type": "application/json" }) },
+    method: method ?? (body === undefined ? "GET" : "POST"),
+    headers: {
+      "x-research-token": getToken(),
+      ...(session ? { authorization: `Bearer ${session}` } : {}),
+      ...(body === undefined ? {} : { "content-type": "application/json" }),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
   });
@@ -40,28 +50,62 @@ async function gsc<T>(path: string, body?: unknown): Promise<T> {
 const EVENT = "metainfo:gsc";
 const notify = () => window.dispatchEvent(new Event(EVENT));
 
-/** Server configuration and this browser's connection. Refreshes after connect/disconnect or a new access token. */
-export function useGscStatus(): GscStatus | null {
-  const [s, setS] = useState<GscStatus | null>(null);
+const UNKNOWN: GscStatus = {
+  mode: "none",
+  connected: false,
+  oauthConfigured: false,
+  accounts: false,
+  signedIn: false,
+  role: null,
+  canManage: false,
+  account: null,
+  connectedBy: null,
+  connectedAt: null,
+  lastError: null,
+  serviceAccount: null,
+  serviceAccountLocked: false,
+  property: null,
+};
+
+/** The workspace's (or this browser's) Search Console setup and the project's saved property. Refreshes after connect/disconnect, sign-in changes or a new access token. */
+export function useGscStatus(projectId?: string): GscStatus | null {
+  const account = useAccount();
+  const scope = `${account.loaded}:${account.workspace?.id ?? ""}`;
+  const [s, setS] = useState<{ key: string; status: GscStatus } | null>(null);
+  const key = `${scope}:${projectId ?? ""}`;
   useEffect(() => {
     let live = true;
     const load = () =>
-      gsc<GscStatus>("status")
-        .then((x) => live && setS(x))
-        .catch(() => live && setS({ oauthConfigured: false, serviceAccount: null, serviceAccountLocked: false, connected: false, via: null }));
+      gsc<GscStatus>(`status${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`)
+        .then((x) => live && setS({ key, status: x }))
+        .catch(() => live && setS({ key, status: UNKNOWN }));
     load();
     window.addEventListener(EVENT, load);
     return () => {
       live = false;
       window.removeEventListener(EVENT, load);
     };
-  }, []);
-  return s;
+  }, [key, projectId]);
+  return s?.key === key ? s.status : null;
+}
+
+/** Ask the server for Google's consent URL (it binds the workspace into a sealed state cookie) and go there. */
+export async function connectGsc(returnTo: "/search-console" | "/settings" = "/search-console"): Promise<void> {
+  const { url } = await gsc<{ url: string }>("connect", { return: returnTo });
+  window.location.assign(url);
 }
 
 export async function disconnectGsc() {
-  await fetch("/api/gsc/disconnect", { method: "POST" }).catch(() => null);
+  await gsc("disconnect", {}).catch(() => null);
   notify();
+}
+
+/** Who the connection belongs to, for display. */
+function connectionLabel(s: GscStatus, workspace?: string): string {
+  if (s.mode === "org") return `Connected for ${workspace ?? "this workspace"}${s.account ? ` as ${s.account}` : ""}`;
+  if (s.mode === "service-account") return `Service account ${s.serviceAccount}`;
+  if (s.mode === "browser") return "Connected in this browser";
+  return "Not connected";
 }
 
 // ---------------------------------------------------------------- formatting
@@ -116,13 +160,15 @@ const FLASH: Record<string, string> = {
   google: "Google didn't complete the sign-in. Try again; if it keeps failing, check the OAuth client's redirect URI.",
   config: "Google rejected this server's OAuth client. Check GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.",
   "not-configured": "Search Console OAuth isn't configured on this server.",
+  "sign-in": "Sign in to connect Search Console for your team.",
 };
 
 // ---------------------------------------------------------------- page
 
 export default function SearchConsole() {
   const [project] = useProject();
-  const status = useGscStatus();
+  const account = useAccount();
+  const status = useGscStatus(project.id || undefined);
   const [flash, setFlash] = useState<{ ok: boolean; msg: string } | null>(null);
   const [sites, setSites] = useState<{ via: string; list: GscSite[]; error?: unknown } | null>(null);
   const [picked, setPicked] = useState("");
@@ -143,7 +189,7 @@ export default function SearchConsole() {
     window.history.replaceState(null, "", window.location.pathname);
   }, []);
 
-  const via = status?.via ?? null;
+  const via = status?.connected ? status.mode : null;
   useEffect(() => {
     if (!via) return;
     let live = true;
@@ -156,7 +202,13 @@ export default function SearchConsole() {
   }, [via, nonce]);
 
   const list = sites && sites.via === via ? sites.list : [];
-  const site = (picked && list.some((s) => s.siteUrl === picked) ? picked : "") || matchSite(list, project.domain)?.siteUrl || list[0]?.siteUrl || "";
+  const has = (u: string | null | undefined): u is string => Boolean(u && list.some((s) => s.siteUrl === u));
+  // This session's pick, then the workspace's saved property for the project, then the one matching its domain.
+  const site = (has(picked) ? picked : "") || (has(status?.property) ? status.property : "") || matchSite(list, project.domain)?.siteUrl || list[0]?.siteUrl || "";
+  const pickSite = (u: string) => {
+    setPicked(u);
+    if (status?.mode === "org" && project.id) gsc("property", { projectId: project.id, site: u }, "PUT").catch(() => null);
+  };
   const key = site ? JSON.stringify({ site, days, country, device, searchType, nonce }) : "";
 
   useEffect(() => {
@@ -168,7 +220,7 @@ export default function SearchConsole() {
       .catch((error) => {
         if (!live) return;
         setResult({ key, error });
-        if (error instanceof GscClientError && (error.code === "not-connected" || error.code === "token")) notify();
+        if (error instanceof GscClientError && ["not-connected", "reconnect", "sign-in", "token"].includes(error.code ?? "")) notify();
       });
     return () => {
       live = false;
@@ -198,20 +250,20 @@ export default function SearchConsole() {
       actions={
         via && list.length > 0 ? (
           <>
-            <select className="select" style={{ height: 34, maxWidth: 280 }} aria-label="Search Console property" value={site} onChange={(e) => setPicked(e.target.value)}>
+            <select className="select" style={{ height: 34, maxWidth: 280 }} aria-label="Search Console property" value={site} onChange={(e) => pickSite(e.target.value)}>
               {list.map((s) => (
                 <option key={s.siteUrl} value={s.siteUrl}>
                   {siteLabel(s.siteUrl)}
                 </option>
               ))}
             </select>
-            {status?.connected && (
+            {status?.connected && status.mode !== "service-account" && status.canManage && (
               <button className="btn" onClick={disconnect}>
                 Disconnect
               </button>
             )}
           </>
-        ) : status?.connected ? (
+        ) : status?.connected && status.mode !== "service-account" && status.canManage ? (
           <button className="btn" onClick={disconnect}>
             Disconnect
           </button>
@@ -243,7 +295,7 @@ export default function SearchConsole() {
         {head}
         <div className="stack">
           {flashBox}
-          <ConnectPanel status={status} onToken={() => notify()} />
+          <ConnectPanel status={status} workspace={account.workspace?.name} onToken={() => notify()} />
         </div>
       </main>
     );
@@ -255,7 +307,8 @@ export default function SearchConsole() {
       <div className="stack">
         {flashBox}
         <div className="row small muted">
-          {via === "oauth" ? <span className="badge gain">Connected with your Google account</span> : <span className="badge accent">Service account {status.serviceAccount}</span>}
+          <span className={`badge ${via === "service-account" ? "accent" : "gain"}`}>{connectionLabel(status, account.workspace?.name)}</span>
+          {status.mode === "org" && list.length > 1 && <span>The property you pick is saved for everyone in the workspace.</span>}
           {project.domain && list.length > 0 && !matchSite(list, project.domain) && <span>No property matches {project.domain}; showing {siteLabel(site)}.</span>}
           {shown && (
             <span>
@@ -332,26 +385,51 @@ export default function SearchConsole() {
 
 // ---------------------------------------------------------------- not configured / not connected
 
-function ConnectPanel({ status, onToken }: { status: GscStatus; onToken: () => void }) {
-  if (status.serviceAccountLocked && !status.oauthConfigured) {
-    return (
-      <>
-        <ErrorBox error={new ResearchError("token", "token")} onRetry={onToken} />
-        <p className="small muted">This server reads Search Console with a service account. Enter its RESEARCH_TOKEN to use it.</p>
-      </>
-    );
-  }
+function ConnectButton({ returnTo, label = "Connect Google Search Console", small }: { returnTo?: "/search-console" | "/settings"; label?: string; small?: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  return (
+    <>
+      <button
+        className={`btn btn-primary${small ? " btn-sm" : ""}`}
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setErr("");
+          try {
+            await connectGsc(returnTo);
+          } catch (e) {
+            setErr(e instanceof Error ? e.message : String(e));
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? "Opening Google" : label}
+      </button>
+      {err && <span className="small" style={{ color: "var(--fail)" }}>{err}</span>}
+    </>
+  );
+}
+
+function ConnectPanel({ status, workspace, onToken }: { status: GscStatus; workspace?: string; onToken: () => void }) {
+  const tokenBox = status.serviceAccountLocked && (
+    <>
+      <ErrorBox error={new ResearchError("token", "token")} onRetry={onToken} />
+      <p className="small muted">This server can also read Search Console with its service account. Enter its RESEARCH_TOKEN to use it.</p>
+    </>
+  );
   if (!status.oauthConfigured) {
+    if (status.serviceAccountLocked) return <>{tokenBox}</>;
     return (
       <div className="card card-pad">
         <EmptyState
           title="Search Console isn't set up on this server"
           body={
             <>
-              Add one of these to the server&apos;s environment, then reload. <b>OAuth</b> (each visitor connects their own Google account):{" "}
+              Add one of these to the server&apos;s environment, then reload. <b>OAuth</b> (an admin connects Google once for the whole workspace):{" "}
               <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> from a Google Cloud OAuth client (Web application) with the Search Console API enabled, and{" "}
               <code>{typeof window === "undefined" ? "" : window.location.origin}/api/gsc/callback</code> as an authorised redirect URI. Optionally <code>GSC_COOKIE_SECRET</code> to encrypt the
-              connection cookie. <b>Service account</b> (self-hosting and MCP): <code>GSC_SERVICE_ACCOUNT_JSON</code> with the key file&apos;s JSON, and add the service account&apos;s email as a
+              stored connection. <b>Service account</b> (self-hosting and MCP): <code>GSC_SERVICE_ACCOUNT_JSON</code> with the key file&apos;s JSON, and add the service account&apos;s email as a
               user on your property in Search Console.
             </>
           }
@@ -359,20 +437,68 @@ function ConnectPanel({ status, onToken }: { status: GscStatus; onToken: () => v
       </div>
     );
   }
-  return (
-    <div className="card card-pad gsc-connect">
-      <div style={{ flex: 1, minWidth: 260 }}>
-        <h2 className="section-title">Connect Google Search Console</h2>
-        <p className="section-sub" style={{ marginBottom: 0 }}>
-          See the clicks, impressions and positions Google itself records for your site, not estimates. MetaInfo asks for read-only access; the connection is kept in an encrypted cookie in
-          this browser and you can disconnect at any time.
-        </p>
-        {status.serviceAccountLocked && <p className="small muted" style={{ marginTop: 8 }}>Or enter this server&apos;s access token in Settings to use its service account.</p>}
+  if (status.accounts && !status.signedIn) {
+    return (
+      <>
+        <div className="card card-pad gsc-connect">
+          <div style={{ flex: 1, minWidth: 260 }}>
+            <h2 className="section-title">Sign in to connect for your team</h2>
+            <p className="section-sub" style={{ marginBottom: 0 }}>
+              Search Console is connected once per workspace: an admin signs in with Google and everyone in the workspace sees the same real clicks, impressions and positions. The
+              connection is stored on the server; nobody&apos;s browser ever holds the Google token.
+            </p>
+          </div>
+          <Link className="btn btn-primary" href="/login">
+            Sign in
+          </Link>
+        </div>
+        {tokenBox}
+      </>
+    );
+  }
+  const name = workspace ?? "this workspace";
+  if (status.lastError) {
+    return (
+      <div className="card card-pad gsc-connect">
+        <div style={{ flex: 1, minWidth: 260 }}>
+          <h2 className="section-title">Reconnect Search Console</h2>
+          <p className="section-sub" style={{ marginBottom: 0 }}>
+            The Google connection for {name}
+            {status.account ? ` (${status.account})` : ""} stopped working: {status.lastError}
+            {status.canManage ? "" : " Ask an admin to reconnect it."}
+          </p>
+        </div>
+        {status.canManage && <ConnectButton label="Reconnect" />}
       </div>
-      <a className="btn btn-primary" href="/api/gsc/connect">
-        Connect Google Search Console
-      </a>
-    </div>
+    );
+  }
+  if (status.signedIn && !status.canManage) {
+    return (
+      <>
+        <div className="card card-pad">
+          <h2 className="section-title">Search Console isn&apos;t connected for {name}</h2>
+          <p className="section-sub" style={{ marginBottom: 0 }}>Ask an admin of the workspace to connect it in Settings or here. Once they do, everyone in the workspace sees the data.</p>
+        </div>
+        {tokenBox}
+      </>
+    );
+  }
+  return (
+    <>
+      <div className="card card-pad gsc-connect">
+        <div style={{ flex: 1, minWidth: 260 }}>
+          <h2 className="section-title">Connect Google Search Console{status.signedIn ? ` for ${name}` : ""}</h2>
+          <p className="section-sub" style={{ marginBottom: 0 }}>
+            See the clicks, impressions and positions Google itself records for your site, not estimates. MetaInfo asks for read-only access.{" "}
+            {status.signedIn
+              ? "The connection is stored on the server for the whole workspace, so every member sees the same data; admins can disconnect it at any time."
+              : "The connection is kept in an encrypted cookie in this browser; you can disconnect at any time."}
+          </p>
+        </div>
+        <ConnectButton />
+      </div>
+      {tokenBox}
+    </>
   );
 }
 
@@ -865,19 +991,35 @@ function Inspector({ site }: { site: string }) {
 
 /** Compact status + connect/disconnect, for Settings. */
 export function GscConnection() {
+  const account = useAccount();
   const status = useGscStatus();
   if (!status) return <span className="badge">Checking</span>;
+  const usable = status.connected;
+  const label = usable
+    ? connectionLabel(status, account.workspace?.name)
+    : status.lastError
+      ? `Needs reconnecting: ${status.lastError}`
+      : !status.oauthConfigured
+        ? status.serviceAccountLocked
+          ? "Service account needs the access token"
+          : "Not configured on this server"
+        : status.accounts && !status.signedIn
+          ? "Sign in to connect for your team"
+          : status.canManage
+            ? "Not connected"
+            : "Not connected: ask an admin to connect it";
   return (
     <div className="row">
-      <span className={`badge ${status.connected || status.serviceAccount ? "gain" : ""}`}>
-        {status.connected ? "Connected with your Google account" : status.serviceAccount ? `Service account: ${status.serviceAccount}` : status.oauthConfigured ? "Not connected" : status.serviceAccountLocked ? "Service account needs the access token" : "Not configured on this server"}
-      </span>
-      {status.oauthConfigured && !status.connected && (
-        <a className="btn btn-sm btn-primary" href="/api/gsc/connect?return=/settings">
-          Connect Google Search Console
-        </a>
+      <span className={`badge ${usable ? "gain" : ""}`}>{label}</span>
+      {status.oauthConfigured && status.canManage && (status.mode === "none" || status.mode === "service-account" || status.lastError) && (
+        <ConnectButton small returnTo="/settings" label={status.lastError ? "Reconnect" : "Connect Google Search Console"} />
       )}
-      {status.connected && (
+      {status.oauthConfigured && status.accounts && !status.signedIn && (
+        <Link className="btn btn-sm btn-primary" href="/login">
+          Sign in
+        </Link>
+      )}
+      {(status.mode === "org" || status.mode === "browser") && status.canManage && (
         <button className="btn btn-sm btn-ghost" onClick={disconnectGsc}>
           Disconnect
         </button>
