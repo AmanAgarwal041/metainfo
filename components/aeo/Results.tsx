@@ -31,6 +31,7 @@ export function PromptTable({
   brands,
   onOpen,
   onReport,
+  onCompare,
   previous = NONE,
 }: {
   observations: Observation[];
@@ -41,6 +42,8 @@ export function PromptTable({
   onOpen: (o: Observation) => void;
   /** Open the prompt's report: every engine side by side, and what to do. */
   onReport?: (prompt: string) => void;
+  /** Ask this prompt on every engine at once. */
+  onCompare?: (prompt: string) => void;
 }) {
   const [stage, setStage] = useState<Stage | "all">("all");
   const [q, setQ] = useState("");
@@ -103,6 +106,11 @@ export function PromptTable({
                     {onReport && (
                       <button className="link-btn small" onClick={() => onReport(p)}>
                         Compare and improve
+                      </button>
+                    )}
+                    {onCompare && (
+                      <button className="link-btn small" onClick={() => onCompare(p)}>
+                        Compare engines
                       </button>
                     )}
                   </div>

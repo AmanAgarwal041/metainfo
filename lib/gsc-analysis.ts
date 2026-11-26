@@ -198,6 +198,15 @@ export function opportunities({ queries, pages, queryPages, minImpressions, limi
   const out: GscOpportunity[] = [];
   const top = (list: GscOpportunity[]) => list.sort((a, b) => (b.estGain ?? -1) - (a.estGain ?? -1) || b.impressions - a.impressions).slice(0, limit);
   const base = (r: KeyRow) => ({ impressions: r.impressions, clicks: r.clicks, ctr: r.ctr, position: r.position });
+  // The page that ranks for each query (most impressions), so a fix names the page to change.
+  const ranking = new Map<string, { page: string; impressions: number }>();
+  for (const r of queryPages) {
+    const [q, page] = r.keys ?? [];
+    if (!q || !page) continue;
+    const had = ranking.get(q);
+    if (!had || r.impressions > had.impressions) ranking.set(q, { page, impressions: r.impressions });
+  }
+  const pageFor = (q: string) => (ranking.has(q) ? { page: ranking.get(q)!.page } : {});
 
   // (a) Striking distance: positions 4-20 with real demand.
   out.push(
@@ -219,6 +228,7 @@ export function opportunities({ queries, pages, queryPages, minImpressions, limi
               "Refresh the content (date, examples, data) and request re-indexing with URL inspection.",
             ],
             query: q.key,
+            ...pageFor(q.key),
             ...base(q),
             estGain: gain,
           };
@@ -247,6 +257,7 @@ export function opportunities({ queries, pages, queryPages, minImpressions, limi
               "Check the result in two to four weeks: CTR should rise at a similar position.",
             ],
             query: q.key,
+            ...pageFor(q.key),
             ...base(q),
             estGain: gain,
           };
@@ -320,7 +331,7 @@ export function opportunities({ queries, pages, queryPages, minImpressions, limi
                 "Refresh the ranking page: answer the query first, update facts and dates, and cover what the new winners cover.",
                 "If an AI Overview appeared, make the answer quotable: a direct one-to-two sentence answer, a list or table, and a cited source.",
               ],
-          ...(isPage ? { page: r.key } : { query: r.key }),
+          ...(isPage ? { page: r.key } : { query: r.key, ...pageFor(r.key) }),
           ...base(r),
           estGain: lost,
         };
@@ -344,6 +355,7 @@ export function opportunities({ queries, pages, queryPages, minImpressions, limi
             "Track AI Overview citations for this query on the AI visibility page.",
           ],
           query: q.key,
+          ...pageFor(q.key),
           ...base(q),
           estGain: null,
         })),

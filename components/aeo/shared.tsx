@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { citesBrand, nameOf, PROMPT_TYPES, STAGES, type Brand, type BrandResult, type PromptType, type Sentiment } from "@/lib/aeo";
 import type { Observation } from "@/lib/ai-visibility";
 import type { Project } from "@/lib/project";
@@ -76,4 +76,14 @@ export function Section({ title, sub, children, actions }: { title: string; sub?
       <div style={{ marginTop: 12 }}>{children}</div>
     </section>
   );
+}
+
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Answer text with the brand and competitor names marked. */
+export function Highlight({ text, terms }: { text: string; terms: string[] }) {
+  const t = terms.filter((x) => x.length >= 2);
+  if (!t.length) return <>{text}</>;
+  const parts = text.split(new RegExp(`(${t.map(esc).join("|")})`, "giu"));
+  return <>{parts.map((p, i) => (t.some((x) => x.toLowerCase() === p.toLowerCase()) ? <mark key={i}>{p}</mark> : <Fragment key={i}>{p}</Fragment>))}</>;
 }

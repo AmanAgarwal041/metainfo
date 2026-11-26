@@ -19,6 +19,8 @@ import { fmtNum, getToken, ResearchError, toCsv } from "@/lib/research-client";
 import { Distribution, LineChart } from "./charts";
 import { Delta, EmptyState, Kpi, PageHead } from "./kit";
 import { ErrorBox } from "./research/common";
+import { CollatedPrompt, FixPromptButton, PickBox, useFixPicker } from "./FixPrompt";
+import { fromGscOpportunity, GSC_RULES, gscBrief, type PromptContext } from "@/lib/fix-prompts";
 import { download } from "./ui";
 
 // ---------------------------------------------------------------- client API
@@ -125,6 +127,8 @@ function connectionLabel(s: GscStatus, workspace?: string): string {
 
 const pct = (n: number, d = 1) => `${(n * 100).toFixed(d)}%`;
 const day = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+/** A property's site as a URL for prompts: sc-domain:example.com → https://example.com. */
+const siteHome = (s: string) => (s.startsWith("sc-domain:") ? `https://${s.slice(10)}` : s.replace(/\/$/, ""));
 const shortUrl = (u: string) => u.replace(/^https?:\/\/(www\.)?/, "");
 const siteLabel = (s: string) => (s.startsWith("sc-domain:") ? `${s.slice(10)} (domain)` : shortUrl(s).replace(/\/$/, ""));
 
@@ -735,7 +739,7 @@ function ReportView({ report, dim }: { report: GscReport; dim: boolean }) {
         </div>
       )}
 
-      <Opportunities items={report.opportunities} />
+      <Opportunities items={report.opportunities} report={report} />
 
       {report.queries.length > 0 && <RowsTable title="Top queries" noun="query" rows={report.queries} hasPrev={Boolean(p)} site={report.site} kind="query" />}
       {report.pages.length > 0 && <RowsTable title="Top pages" noun="page" rows={report.pages} hasPrev={Boolean(p)} site={report.site} kind="page" />}
@@ -808,9 +812,20 @@ const KIND_HELP: Record<OpportunityKind, string> = {
   "answer-first": "Questions and comparisons, the searches AI Overviews answer: lead with a direct answer to get cited.",
 };
 
-function Opportunities({ items }: { items: GscOpportunity[] }) {
+function Opportunities({ items, report }: { items: GscOpportunity[]; report: GscReport }) {
   const [kind, setKind] = useState<OpportunityKind | null>(null);
   const [all, setAll] = useState(false);
+  const picker = useFixPicker();
+  // One prompt for the whole plan: every opportunity, biggest estimated gain first, with the site's numbers as context.
+  const fixes = useMemo(
+    () => [...items].sort((a, b) => (b.estGain ?? -1) - (a.estGain ?? -1) || b.impressions - a.impressions).map(fromGscOpportunity),
+    [items],
+  );
+  const byId = useMemo(() => new Map(fixes.map((f) => [f.id, f])), [fixes]);
+  const ctx = useMemo<PromptContext>(
+    () => ({ site: siteHome(report.site), source: "Google Search Console analysis", brief: gscBrief(report), rules: GSC_RULES }),
+    [report],
+  );
   const groups = KIND_ORDER.map((k) => {
     const list = items.filter((o) => o.kind === k);
     return { kind: k, list, gain: list.reduce((n, o) => n + (o.estGain ?? 0), 0) };
@@ -833,6 +848,15 @@ function Opportunities({ items }: { items: GscOpportunity[] }) {
         <p className="muted small">No clear opportunities in this period. Try a longer date range, or remove filters.</p>
       ) : (
         <>
+          <div className="gsc-plan">
+            <p className="small" style={{ margin: "0 0 8px" }}>
+              <b>Improve your ranking with an AI assistant.</b>{" "}
+              <span className="muted">
+                Copy one prompt with your real Search Console numbers, the pages to change and what to protect, then paste it into Claude Code, Cursor or ChatGPT. Tick opportunities below to choose which go in.
+              </span>
+            </p>
+            <CollatedPrompt fixes={fixes} ctx={ctx} picker={picker} />
+          </div>
           <div className="tabs" role="tablist" aria-label="Opportunity types">
             {groups.map((g) => (
               <button
@@ -861,6 +885,7 @@ function Opportunities({ items }: { items: GscOpportunity[] }) {
               {shown.map((o) => (
                 <details key={o.id} className="gsc-opp">
                   <summary>
+                    <PickBox id={o.id} title={o.title} picker={picker} />
                     <span className="gsc-opp-title">{o.title}</span>
                     <span className="gsc-opp-meta small muted">
                       {o.impressions.toLocaleString()} impr. · {o.clicks.toLocaleString()} clicks{o.position ? ` · pos ${o.position}` : ""}
@@ -869,6 +894,14 @@ function Opportunities({ items }: { items: GscOpportunity[] }) {
                   </summary>
                   <div className="gsc-opp-body">
                     <p className="small">{o.why}</p>
+                    {o.page && !o.pages && (
+                      <p className="small muted" style={{ margin: "0 0 6px" }}>
+                        Ranking page:{" "}
+                        <a href={o.page} target="_blank" rel="noreferrer noopener" className="break">
+                          {shortUrl(o.page)}
+                        </a>
+                      </p>
+                    )}
                     {o.pages && (
                       <ul className="gsc-pages small">
                         {o.pages.map((pg) => (
@@ -888,13 +921,14 @@ function Opportunities({ items }: { items: GscOpportunity[] }) {
                         <li key={s}>{s}</li>
                       ))}
                     </ol>
-                    {o.query && (
-                      <div className="row" style={{ marginTop: 8 }}>
+                    <div className="row" style={{ marginTop: 8, alignItems: "flex-start" }}>
+                      {o.query && (
                         <Link className="btn btn-sm" href={`/serp?q=${encodeURIComponent(o.query)}`}>
                           See the SERP
                         </Link>
-                      </div>
-                    )}
+                      )}
+                      {byId.get(o.id) && <FixPromptButton fix={byId.get(o.id)!} ctx={ctx} />}
+                    </div>
                   </div>
                 </details>
               ))}
