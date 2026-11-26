@@ -3,6 +3,7 @@ import { FACTORS } from "./aeo";
 import type { SiteFinding, TemplateIssue } from "./site-audit";
 import type { Insight } from "./traffic-insights";
 import type { Check } from "./types";
+import type { GscOpportunity, KeyRow, Totals } from "./gsc-analysis";
 
 // Prompts for coding and writing assistants (Claude Code, Cursor, Copilot, ChatGPT) that apply MetaInfo's fixes.
 // One prompt per fix, or one prompt for several. Kept short on purpose: what's wrong, what to change, where,
@@ -38,7 +39,13 @@ export interface PromptContext {
   site: string;
   /** Which MetaInfo report found them, e.g. "page audit". */
   source: string;
+  /** Data the assistant should know before it starts (e.g. the site's Search Console numbers), a line each. */
+  brief?: string[];
+  /** Rules for this source, said once after the kind rules. */
+  rules?: string[];
 }
+
+const briefLines = (ctx: PromptContext) => (ctx.brief?.length ? ["Context:", ...ctx.brief.map((b) => `- ${b}`), ""] : []);
 
 /** Beyond this, a collated prompt keeps the first fixes (they're listed by priority) and says how many it left out. */
 export const MAX_FIXES = 15;
@@ -89,11 +96,11 @@ const fence = (code: string) => {
 
 /** A prompt for one fix. */
 export function fixPrompt(fix: Fix, ctx: PromptContext): string {
-  const lines = [`Fix on ${ctx.site} (found by a MetaInfo ${ctx.source}): ${fix.title}.`, ""];
+  const lines = [`Fix on ${ctx.site} (found by a MetaInfo ${ctx.source}): ${fix.title}.`, "", ...briefLines(ctx)];
   if (fix.problem) lines.push(`Now: ${clip(fix.problem, TEXT)}`);
   lines.push(...changeLines(fix.change, ""), ...whereLine(fix.where, ""));
   if (fix.snippet) lines.push("", "Example:", ...fence(clipBlock(fix.snippet, SNIPPET)));
-  lines.push("", RULES[fix.kind]);
+  lines.push("", RULES[fix.kind], ...(ctx.rules ?? []));
   if (fix.verify) lines.push(`Done when: ${clip(fix.verify, TEXT)}`);
   return lines.join("\n");
 }
@@ -103,7 +110,7 @@ export function fixesPrompt(fixes: Fix[], ctx: PromptContext): string {
   if (fixes.length === 1) return fixPrompt(fixes[0], ctx);
   const list = fixes.slice(0, MAX_FIXES);
   const left = fixes.length - list.length;
-  const lines = [`Fix these ${list.length} issues on ${ctx.site}, found by a MetaInfo ${ctx.source}. They're in priority order.`, ""];
+  const lines = [`Fix these ${list.length} issues on ${ctx.site}, found by a MetaInfo ${ctx.source}. They're in priority order.`, "", ...briefLines(ctx)];
   list.forEach((f, i) => {
     lines.push(`${i + 1}. ${f.title}${list.some((x) => x.kind !== f.kind) || f.kind !== "code" ? ` [${f.kind}]` : ""}`);
     if (f.problem) lines.push(`   Now: ${clip(f.problem, TEXT)}`);
@@ -123,6 +130,7 @@ export function fixesPrompt(fixes: Fix[], ctx: PromptContext): string {
   const kinds = [...new Set(list.map((f) => f.kind))];
   lines.push("", kinds.length === 1 ? RULES[kinds[0]] : kinds.map((k) => `[${k}] ${RULES[k]}`).join("\n"));
   if (kinds.includes("code")) lines.push("Several fixes may share one cause (a layout, a header, a config): fix it once there.");
+  lines.push(...(ctx.rules ?? []));
   lines.push("When done, list each number with what you changed, or why you couldn't.");
   return lines.join("\n");
 }
@@ -207,3 +215,56 @@ export function fromGap(g: { factor: FactorId; you: number; them: number; fix: s
     change: g.fix,
   };
 }
+
+// ---------------------------------------------------------------- Search Console
+
+const GSC_KIND: Record<GscOpportunity["kind"], FixKind> = {
+  "striking-distance": "content",
+  "low-ctr": "code",
+  cannibalisation: "code",
+  declining: "content",
+  "answer-first": "content",
+};
+
+const pct1 = (n: number) => `${(n * 100).toFixed(1)}%`;
+const num = (n: number) => n.toLocaleString("en-US");
+
+/** A Search Console opportunity: the query, its numbers and the page that ranks for it. */
+export function fromGscOpportunity(o: GscOpportunity): Fix {
+  const where = o.pages?.length ? o.pages.map((p) => `${p.page} (${p.share}% of impressions, pos ${p.position})`) : o.page ? [o.page] : undefined;
+  const q = o.query ? `“${o.query}”` : "the page";
+  const verify: Record<GscOpportunity["kind"], string> = {
+    "striking-distance": `in Search Console, ${q} moves toward the top 3 two to four weeks after re-indexing.`,
+    "low-ctr": `CTR for ${q} rises at a similar position within two to four weeks.`,
+    cannibalisation: `one page gets most of the impressions for ${q}; the others redirect or target other queries.`,
+    declining: `clicks for ${q} stop falling and recover over the next period.`,
+    "answer-first": `the page answers ${q} in its first lines and can be quoted as-is.`,
+  };
+  return {
+    id: o.id,
+    title: o.title,
+    kind: GSC_KIND[o.kind],
+    problem: o.why,
+    change: o.steps,
+    where,
+    verify: verify[o.kind],
+  };
+}
+
+/** What the assistant should know about the site's search performance before changing anything. */
+export function gscBrief(r: { site: string; days: number; totals: Totals; previous: Totals | null; queries?: KeyRow[] }): string[] {
+  const t = r.totals;
+  const change = r.previous && r.previous.clicks ? ` (${t.clicks >= r.previous.clicks ? "+" : ""}${Math.round(((t.clicks - r.previous.clicks) / r.previous.clicks) * 100)}% vs the previous ${r.days} days)` : "";
+  const lines = [
+    `Google Search Console, property ${r.site.replace(/^sc-domain:/, "")}, last ${r.days} days: ${num(t.clicks)} clicks${change}, ${num(t.impressions)} impressions, CTR ${pct1(t.ctr)}, average position ${t.position || "n/a"}.`,
+  ];
+  const keep = (r.queries ?? []).filter((q) => q.clicks > 0 && q.position > 0 && q.position <= 3.5).slice(0, 5);
+  if (keep.length) lines.push(`Queries that already rank in the top 3, don't weaken them: ${keep.map((q) => `“${clip(q.key, 60)}” (${num(q.clicks)} clicks, pos ${q.position})`).join("; ")}.`);
+  return lines;
+}
+
+/** House rules for search fixes. */
+export const GSC_RULES = [
+  "Search rules: write for the searcher, not for keyword density; keep each page's existing URL (if a URL must change, add a 301); titles under ~60 characters and meta descriptions under ~155; don't remove content that ranks for other queries.",
+  "Afterwards list the URLs you changed so I can request re-indexing in Search Console's URL inspection.",
+];

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { analyzeAnswer, opportunities, type Answer, type BrandResult, type Opportunity } from "@/lib/aeo";
 import { loadActions, saveActions, trackAction, type AeoAction, type ActionStatus, type RunAnswers } from "@/lib/aeo-actions";
 import type { PromptContext } from "@/lib/fix-prompts";
@@ -24,23 +24,15 @@ import { gscNote, useGscOpportunities } from "@/lib/aeo-gsc";
 import { useTraffic } from "@/lib/traffic-client";
 import { AI_KINDS } from "@/lib/traffic";
 import { trafficInsights } from "@/lib/traffic-insights";
-import { brandResults, brandsOf, SentimentBadge } from "../aeo/shared";
+import { brandResults, brandsOf, Highlight, SentimentBadge } from "../aeo/shared";
 import PromptReport from "../aeo/PromptReport";
 import Simulator from "../aeo/Simulator";
+import EngineCompare from "../aeo/EngineCompare";
 import { scoreColor } from "../ui";
 import { ErrorBox, ProviderNotice, useResearchStatus } from "./common";
 
 const TRAFFIC_DAYS = 30;
 const fmt = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-function Highlight({ text, terms }: { text: string; terms: string[] }) {
-  const t = terms.filter((x) => x.length >= 2);
-  if (!t.length) return <>{text}</>;
-  const parts = text.split(new RegExp(`(${t.map(esc).join("|")})`, "giu"));
-  return <>{parts.map((p, i) => (t.some((x) => x.toLowerCase() === p.toLowerCase()) ? <mark key={i}>{p}</mark> : <Fragment key={i}>{p}</Fragment>))}</>;
-}
-
 function Readiness({ site }: { site: TrackedSite | null }) {
   const last = site?.snapshots.at(-1);
   if (!site || !last) {
@@ -84,7 +76,7 @@ function Readiness({ site }: { site: TrackedSite | null }) {
   );
 }
 
-type Tab = "overview" | "prompts" | "by-prompt" | "citations" | "actions" | "impact" | "simulate" | "setup";
+type Tab = "overview" | "prompts" | "by-prompt" | "compare" | "citations" | "actions" | "impact" | "simulate" | "setup";
 
 export default function AiVisibility() {
   const [project, update] = useProject();
@@ -101,6 +93,7 @@ export default function AiVisibility() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [simulate, setSimulate] = useState<{ prompt: string; engine?: AiEngine; nonce: number } | null>(null);
   const [report, setReport] = useState<{ prompt: string; nonce: number } | null>(null);
+  const [compare, setCompare] = useState<{ prompt: string; nonce: number } | null>(null);
   const [actions, setActions] = useState<AeoAction[]>([]);
   const [sims, setSims] = useState<SavedSimulation[]>([]);
   const traffic = useTraffic(project.id || null, TRAFFIC_DAYS);
@@ -212,6 +205,10 @@ export default function AiVisibility() {
     setReport({ prompt, nonce: Date.now() });
     setTab("by-prompt");
   };
+  const openCompare = (prompt: string) => {
+    setCompare({ prompt, nonce: Date.now() });
+    setTab("compare");
+  };
   const active: Tab = tab ?? (last ? "overview" : "setup");
   const terms = [brand, project.domain, ...project.aliases, ...brands.slice(1).map((b) => b.name)];
 
@@ -257,6 +254,7 @@ export default function AiVisibility() {
               ["overview", "Dashboard"],
               ["prompts", "Prompts"],
               ["by-prompt", "By prompt"],
+              ["compare", "Compare engines"],
               ["citations", "Citations"],
               ["actions", `Recommendations${actions.some((a) => a.status === "todo" || a.status === "doing") ? ` ${actions.filter((a) => a.status === "todo" || a.status === "doing").length}` : ""}`],
               ["impact", "Impact"],
@@ -317,6 +315,19 @@ export default function AiVisibility() {
             </section>
 
           </>
+        ) : active === "compare" ? (
+          <EngineCompare
+            project={project}
+            brand={brand}
+            brands={brands}
+            observations={observations}
+            runAt={last?.at ?? null}
+            live={!!status?.dataforseo}
+            judge={judge && llm}
+            initial={compare}
+            onSimulation={(x) => setSims(saveSim(project.id, x))}
+            onOpenSimulator={openSim}
+          />
         ) : active === "simulate" ? (
           <Simulator project={project} brand={brand} observations={observations} llm={llm} initial={simulate} onResult={(x) => setSims(saveSim(project.id, x))} />
         ) : !last && active === "overview" ? (
@@ -351,7 +362,7 @@ export default function AiVisibility() {
             )}
             {active === "prompts" && (
               <section className="card card-pad">
-                <PromptTable observations={observations} previous={previous} brand={brand} brands={brands} onOpen={setViewing} onReport={openReport} />
+                <PromptTable observations={observations} previous={previous} brand={brand} brands={brands} onOpen={setViewing} onReport={openReport} onCompare={openCompare} />
               </section>
             )}
             {active === "by-prompt" && (
