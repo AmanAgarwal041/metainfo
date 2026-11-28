@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { analyzeAnswer, opportunities, type Answer, type BrandResult, type Opportunity } from "@/lib/aeo";
+import { analyzeAnswer, classifyPrompt, opportunities, PROMPT_TYPES, STAGES, type Answer, type BrandResult, type Opportunity, type Stage } from "@/lib/aeo";
 import { loadActions, saveActions, trackAction, type AeoAction, type ActionStatus, type RunAnswers } from "@/lib/aeo-actions";
 import type { PromptContext } from "@/lib/fix-prompts";
 import { loadRuns, saveRun, type AiRun, type Observation } from "@/lib/ai-visibility";
@@ -28,6 +28,7 @@ import { brandResults, brandsOf, Highlight, SentimentBadge } from "../aeo/shared
 import PromptReport from "../aeo/PromptReport";
 import Simulator from "../aeo/Simulator";
 import EngineCompare from "../aeo/EngineCompare";
+import PromptPanel from "../aeo/PromptPanel";
 import { scoreColor } from "../ui";
 import { ErrorBox, ProviderNotice, useResearchStatus } from "./common";
 
@@ -76,6 +77,17 @@ function Readiness({ site }: { site: TrackedSite | null }) {
   );
 }
 
+/** The filter bar over the answer views: which runs, engines and buying stages count. */
+interface Filters {
+  days: 0 | 7 | 30 | 90;
+  /** ISO start of the date range, set when the range is picked; null for all time. */
+  since: string | null;
+  engine: AiEngine | "all";
+  stage: Stage | "all";
+}
+const NO_FILTERS: Filters = { days: 0, since: null, engine: "all", stage: "all" };
+const FILTERED_TABS = ["overview", "prompts", "by-prompt", "citations"];
+
 type Tab = "overview" | "prompts" | "by-prompt" | "compare" | "citations" | "actions" | "impact" | "simulate" | "setup";
 
 export default function AiVisibility() {
@@ -96,6 +108,8 @@ export default function AiVisibility() {
   const [compare, setCompare] = useState<{ prompt: string; nonce: number } | null>(null);
   const [actions, setActions] = useState<AeoAction[]>([]);
   const [sims, setSims] = useState<SavedSimulation[]>([]);
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [picked, setPicked] = useState<string | null>(null);
   const traffic = useTraffic(project.id || null, TRAFFIC_DAYS);
   const gsc = useGscOpportunities(project.id);
 
@@ -116,6 +130,21 @@ export default function AiVisibility() {
   const prev = runs.at(-2);
   const previous = useMemo<Answer[]>(() => (prev?.observations ?? []).map((o) => ({ ...o, brands: brandResults(o, brands) })), [prev, brands]);
   const history = useMemo<RunAnswers[]>(() => runs.map((r) => ({ at: r.at, answers: r.observations.map((o) => ({ ...o, brands: brandResults(o, brands) })) })), [runs, brands]);
+  // The answer views (Dashboard, Prompts, By prompt, Citations) follow the filter bar; recommendations,
+  // simulations and comparisons use every answer.
+  const fRuns = useMemo(
+    () =>
+      runs
+        .filter((r) => !filters.since || r.at >= filters.since)
+        .map((r) => ({ ...r, observations: r.observations.filter((o) => (filters.engine === "all" || o.engine === filters.engine) && (filters.stage === "all" || PROMPT_TYPES[classifyPrompt(o.prompt, brand)].stage === filters.stage)) }))
+        .filter((r) => r.observations.length),
+    [runs, filters, brand],
+  );
+  const filtered = filters !== NO_FILTERS;
+  const fHistory = useMemo<RunAnswers[]>(() => (filtered ? fRuns.map((r) => ({ at: r.at, answers: r.observations.map((o) => ({ ...o, brands: brandResults(o, brands) })) })) : history), [filtered, fRuns, brands, history]);
+  const fObservations = useMemo(() => (filtered ? (fRuns.at(-1)?.observations ?? []).map((o) => ({ ...o, brands: brandResults(o, brands) })) : observations), [filtered, fRuns, brands, observations]);
+  const fPrevious = useMemo<Answer[]>(() => (filtered ? fHistory.at(-2)?.answers ?? [] : previous), [filtered, fHistory, previous]);
+  const runEngines = useMemo(() => AI_ENGINES.filter((e) => runs.some((r) => r.observations.some((o) => o.engine === e.id))), [runs]);
   const statusKnown = traffic.state === "ready" && (traffic.stats.agents.length ? traffic.stats.agents.some((a) => a.unknownStatus < a.hits) : traffic.site.lastVia !== "next");
   const suggestions = useMemo<Suggestion[]>(() => {
     const order = { high: 0, medium: 1, low: 2 };
@@ -205,6 +234,7 @@ export default function AiVisibility() {
     setReport({ prompt, nonce: Date.now() });
     setTab("by-prompt");
   };
+  const openPanel = (prompt: string) => setPicked(picked === prompt ? null : prompt);
   const openCompare = (prompt: string) => {
     setCompare({ prompt, nonce: Date.now() });
     setTab("compare");
@@ -267,6 +297,44 @@ export default function AiVisibility() {
             </button>
           ))}
         </div>
+
+        {last && FILTERED_TABS.includes(active) && (
+          <div className="filter-bar" role="group" aria-label="Filters">
+            <label className="filter">
+              <span>Date</span>
+              <select
+                className="select"
+                value={filters.days}
+                onChange={(e) => {
+                  const days = Number(e.currentTarget.value) as Filters["days"];
+                  setFilters({ ...filters, days, since: days ? new Date(Date.now() - days * 86_400_000).toISOString() : null });
+                }}
+              >
+                <option value={0}>All runs</option>
+                <option value={7}>Last 7 days</option>
+                <option value={30}>Last 30 days</option>
+                <option value={90}>Last 90 days</option>
+              </select>
+            </label>
+            <label className="filter">
+              <span>Engine</span>
+              <select className="select" value={filters.engine} onChange={(e) => setFilters({ ...filters, engine: e.currentTarget.value as Filters["engine"] })}>
+                <option value="all">All engines</option>
+                {runEngines.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
+              </select>
+            </label>
+            <label className="filter">
+              <span>Buyer journey</span>
+              <select className="select" value={filters.stage} onChange={(e) => setFilters({ ...filters, stage: e.currentTarget.value as Filters["stage"] })}>
+                <option value="all">All stages</option>
+                {(Object.keys(STAGES) as Stage[]).map((s) => <option key={s} value={s}>{STAGES[s]}</option>)}
+              </select>
+            </label>
+            {filtered && (
+              <button className="btn btn-sm btn-ghost" onClick={() => setFilters(NO_FILTERS)}>Clear filters</button>
+            )}
+          </div>
+        )}
 
         {active === "setup" ? (
           <>
@@ -354,23 +422,33 @@ export default function AiVisibility() {
               Last run {fmt(last.at)}: {last.observations.length} answers, ${last.cost.toFixed(3)}.
               {observations.some((o) => o.brands?.some((b) => b.judgedBy === "llm")) ? " Sentiment judged by Claude." : " Sentiment from word lists."}
             </p>
-            {active === "overview" && (
+            {FILTERED_TABS.includes(active) && !fHistory.length ? (
+              <div className="card">
+                <EmptyState title="No answers match these filters" body="Widen the date range or pick another engine or stage." action={{ label: "Clear filters", onClick: () => setFilters(NO_FILTERS) }} />
+              </div>
+            ) : null}
+            {active === "overview" && fHistory.length > 0 && (
               <>
-                <Dashboard runs={history} brands={brands} brand={brand} />
+                <Dashboard runs={fHistory} brands={brands} brand={brand} />
                 <SignalsDashboard traffic={traffic} days={TRAFFIC_DAYS} domain={project.domain} brand={brand} prompts={project.prompts} sims={sims} answersTracked onSimulate={openSim} />
               </>
             )}
-            {active === "prompts" && (
+            {active === "prompts" && fHistory.length > 0 && (
+              <div className={picked && fObservations.some((o) => o.prompt === picked) ? "with-drawer" : ""}>
+                <section className="card card-pad">
+                  <PromptTable observations={fObservations} previous={fPrevious} brand={brand} brands={brands} onOpen={setViewing} onReport={openReport} onCompare={openCompare} onPick={openPanel} picked={picked} />
+                </section>
+                {picked && fObservations.some((o) => o.prompt === picked) && (
+                  <PromptPanel key={picked} prompt={picked} runs={fHistory} brands={brands} brand={brand} onClose={() => setPicked(null)} onFull={openReport} onCompare={openCompare} />
+                )}
+              </div>
+            )}
+            {active === "by-prompt" && fHistory.length > 0 && (
               <section className="card card-pad">
-                <PromptTable observations={observations} previous={previous} brand={brand} brands={brands} onOpen={setViewing} onReport={openReport} onCompare={openCompare} />
+                <PromptReport answers={fObservations} previous={fPrevious} brands={brands} brand={brand} domain={project.domain} initial={report} onSimulate={openSim} tracked={trackedIds} onTrack={(o) => track([o])} />
               </section>
             )}
-            {active === "by-prompt" && (
-              <section className="card card-pad">
-                <PromptReport answers={answerList} previous={previous} brands={brands} brand={brand} domain={project.domain} initial={report} onSimulate={openSim} tracked={trackedIds} onTrack={(o) => track([o])} />
-              </section>
-            )}
-            {active === "citations" && <CitationsView runs={history} brands={brands} />}
+            {active === "citations" && fHistory.length > 0 && <CitationsView runs={fHistory} brands={brands} />}
             {active === "actions" && <Actions actions={actions} suggestions={suggestions} latest={history.at(-1) ?? null} runs={history} you={project.domain} ctx={ctx} onTrack={track} onUpdate={updateAction} trafficNow={trafficNow} gsc={gscNote(gsc)} />}
             {active === "impact" && <Impact runs={history} brands={brands} actions={actions} projectId={project.id} domain={project.domain} />}
 

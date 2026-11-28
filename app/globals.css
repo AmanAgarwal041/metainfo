@@ -994,3 +994,11 @@ table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
 .compare-sources li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .compare-sim { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .compare-rank td, .compare-rank th { white-space: nowrap; }
+
+/* AI visibility filter bar and the prompt side panel. */
+.filter-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.filter-bar .filter { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-3); }
+.filter-bar .select { min-width: 150px; }
+.prompt-open { text-align: left; font: inherit; color: var(--text); }
+.prompt-open:hover { color: var(--accent); text-decoration: underline; }
+.t tr.is-picked td { background: var(--surface-2); }

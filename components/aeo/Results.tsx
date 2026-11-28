@@ -5,13 +5,10 @@ import {
   citationTable,
   classifyPrompt,
   nameOf,
-  PROMPT_TYPES,
   SOURCE_TYPES,
-  STAGES,
   type Answer,
   type Brand,
   type SourceType,
-  type Stage,
 } from "@/lib/aeo";
 import type { Observation } from "@/lib/ai-visibility";
 import { AI_ENGINES, type AiEngine } from "@/lib/research-types";
@@ -32,6 +29,8 @@ export function PromptTable({
   onOpen,
   onReport,
   onCompare,
+  onPick,
+  picked,
   previous = NONE,
 }: {
   observations: Observation[];
@@ -44,15 +43,16 @@ export function PromptTable({
   onReport?: (prompt: string) => void;
   /** Ask this prompt on every engine at once. */
   onCompare?: (prompt: string) => void;
+  /** Open the prompt's side panel. */
+  onPick?: (prompt: string) => void;
+  picked?: string | null;
 }) {
-  const [stage, setStage] = useState<Stage | "all">("all");
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<"order" | "low" | "high" | "change">("order");
   const engines = AI_ENGINES.filter((e) => observations.some((o) => o.engine === e.id));
   const stats = useMemo(() => new Map(promptRows(observations, previous, brands, brand).map((r) => [r.prompt, r])), [observations, previous, brands, brand]);
   const needle = q.trim().toLowerCase();
   const prompts = [...new Set(observations.map((o) => o.prompt))]
-    .filter((p) => stage === "all" || PROMPT_TYPES[classifyPrompt(p, brand)].stage === stage)
     .filter((p) => !needle || p.toLowerCase().includes(needle))
     .sort((a, b) => {
       const x = stats.get(a)!;
@@ -68,13 +68,6 @@ export function PromptTable({
     <>
       <div className="row" style={{ marginBottom: 12, gap: 10 }}>
         <input className="input search-input" type="search" style={{ flex: 1, minWidth: 200, margin: 0 }} placeholder="Search prompts" aria-label="Search prompts" value={q} onChange={(e) => setQ(e.currentTarget.value)} />
-        <div className="segmented" role="group" aria-label="Stage">
-          {(["all", "awareness", "consideration", "decision"] as const).map((s) => (
-            <button key={s} aria-pressed={stage === s} onClick={() => setStage(s)}>
-              {s === "all" ? "All stages" : STAGES[s]}
-            </button>
-          ))}
-        </div>
         <select className="select" aria-label="Sort prompts" value={sort} onChange={(e) => setSort(e.currentTarget.value as typeof sort)}>
           <option value="order">Your order</option>
           <option value="low">Lowest visibility first</option>
@@ -98,9 +91,15 @@ export function PromptTable({
           </thead>
           <tbody>
             {prompts.map((p) => (
-              <tr key={p}>
+              <tr key={p} className={picked === p ? "is-picked" : undefined}>
                 <td style={{ maxWidth: 320 }}>
-                  {p}
+                  {onPick ? (
+                    <button className="link-btn prompt-open" onClick={() => onPick(p)}>
+                      {p}
+                    </button>
+                  ) : (
+                    p
+                  )}
                   <div className="row" style={{ marginTop: 4, gap: 8 }}>
                     <TypeBadge type={classifyPrompt(p, brand)} />
                     {onReport && (
