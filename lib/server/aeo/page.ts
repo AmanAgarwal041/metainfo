@@ -110,10 +110,22 @@ export function parseMarkdown(md: string, host: string): ParsedPage {
     lists,
     tables,
     outLinks,
-    updated: fm.updated || fm.lastmod || fm.date_modified || fm.datemodified || fm.date || null,
+    updated: fm.updated || fm.lastmod || fm.date_modified || fm.datemodified || fm.date || bodyDate(body) || null,
     schemaTypes: [],
     text,
   };
+}
+
+/**
+ * Markdown served to agents has no JSON-LD, so sites often state the date in the text instead, near the top:
+ * "Last updated: 2026-11-26" or "Updated November 26, 2026". Read that when the front matter has no date.
+ */
+export function bodyDate(body: string): string | null {
+  const m = /\b(?:last\s+updated|last\s+modified|updated(?:\s+on)?)\s*[:\-–]?\s*(\d{4}-\d{2}-\d{2}|[A-Z][a-z]+\.?\s+\d{1,2},?\s+\d{4})/i.exec(body.slice(0, 3000));
+  if (!m) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(m[1])) return m[1];
+  const t = Date.parse(`${m[1].replace(/\./, "")} UTC`);
+  return Number.isNaN(t) ? null : new Date(t).toISOString().slice(0, 10);
 }
 
 export function parsePage(html: string, host: string, contentType = ""): ParsedPage {
